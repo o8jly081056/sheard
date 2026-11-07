@@ -119,10 +119,30 @@ async function toggle(k, status) {
 function touch(k) { db.albums[k].updatedAt = Date.now(); db.dirty[k] = 1; save(); scheduleSync(); }
 
 /* ================= Spotify 目錄（搜尋／歌手作品／曲目） ================= */
+// 快取：記憶體＋存在手機上（重開 App 也不用重抓），大幅減少對 Spotify 的請求次數
 const cache = new Map();
+const PC_KEY = 'heard.spCache', PC_MAX = 150;
+const pcache = (() => { try { return JSON.parse(localStorage.getItem(PC_KEY)) || {}; } catch (e) { return {}; } })();
+const ttlFor = path => path.startsWith('/search') ? 864e5            // 搜尋：1 天
+  : /^\/artists\/[^/]+\/albums/.test(path) ? 7 * 864e5              // 歌手作品：7 天
+  : /^\/(artists|albums)\//.test(path) ? 30 * 864e5 : 0;            // 歌手資料、專輯曲目：30 天
+let pcSaveT = null;
+function pcSave() {
+  clearTimeout(pcSaveT);
+  pcSaveT = setTimeout(() => {
+    const keys = Object.keys(pcache);
+    if (keys.length > PC_MAX) keys.sort((a, b) => pcache[a].t - pcache[b].t).slice(0, keys.length - PC_MAX).forEach(k => delete pcache[k]);
+    try { localStorage.setItem(PC_KEY, JSON.stringify(pcache)); }
+    catch (e) { Object.keys(pcache).sort((a, b) => pcache[a].t - pcache[b].t).slice(0, Math.ceil(Object.keys(pcache).length / 2)).forEach(k => delete pcache[k]); try { localStorage.setItem(PC_KEY, JSON.stringify(pcache)); } catch (e2) {} }
+  }, 500);
+}
 async function spCached(path) {
   if (cache.has(path)) return cache.get(path);
-  const j = await sp(path); cache.set(path, j); return j;
+  const ttl = ttlFor(path), hit = pcache[path];
+  if (ttl && hit && Date.now() - hit.t < ttl) { cache.set(path, hit.j); return hit.j; }
+  const j = await sp(path); cache.set(path, j);
+  if (ttl) { pcache[path] = { t: Date.now(), j }; pcSave(); }
+  return j;
 }
 const isSpId = id => /^[0-9A-Za-z]{22}$/.test(id || '');
 const dedupe = list => { const m = new Map(); list.forEach(a => { const k = albumKey(a); if (!m.has(k)) m.set(k, a); }); return [...m.values()]; };
@@ -134,7 +154,7 @@ async function spSearch(type, q, offset = 0) {
   catch (e) { if (offset) throw e; return await spCached(`/search?type=${type}&limit=10&q=${enc}`); }
 }
 async function searchAlbums(q) {
-  const pages = await Promise.all([0, 10, 20].map(o => spSearch('album', q, o).catch(e => ({ err: e }))));
+  const pages = await Promise.all([0].map(o => spSearch('album', q, o).catch(e => ({ err: e }))));
   if (pages.every(p => !p || p.err)) throw pages[0]?.err || new Error('搜尋失敗');
   return dedupe(pages.flatMap(p => p?.albums?.items || []).filter(Boolean).map(fromSpotify));
 }
@@ -266,8 +286,11 @@ async function sp(path, retry = true) {
   try { const j = await spRaw(path, retry); logSp({ path, ok: true, info: countOf(j) }); return j; }
   catch (e) { logSp({ path, ok: false, info: e.message }); throw e; }
 }
+let spCooldownUntil = 0;
+const cooldownLeft = () => Math.max(0, Math.ceil((spCooldownUntil - Date.now()) / 1000));
 async function spRaw(path, retry = true) {
   if (!spTok) throw new Error('尚未連結 Spotify');
+  if (cooldownLeft()) throw new Error(`Spotify 暫時限制請求，約 ${cooldownLeft()} 秒後自動恢復`);
   if (!spTok.access || Date.now() > spTok.exp) {
     try { await spTokenReq({ grant_type: 'refresh_token', refresh_token: spTok.refresh }); }
     catch (e) { spotifyLogout(); render(); throw new Error('Spotify 登入已過期，請重新連結'); }
@@ -276,7 +299,13 @@ async function spRaw(path, retry = true) {
   if (res.status === 204) return null;
   if (res.status === 401 && retry) { spTok.exp = 0; return spRaw(path, false); }
   if (res.status === 403) throw new Error('Spotify 拒絕存取：請確認你的帳號已加入開發者後台的 User Management，且 App 擁有者有 Premium');
-  if (res.status === 429) throw new Error('Spotify 請求太頻繁，稍後再試');
+  if (res.status === 429) {
+    let reason = ''; try { reason = (await res.json())?.reason || ''; } catch (e) {}
+    const ra = +(res.headers.get('Retry-After') || 0);
+    const wait = ra > 0 ? ra : reason === 'QUOTA_EXCEEDED' ? 600 : 30;
+    spCooldownUntil = Date.now() + wait * 1000;
+    throw new Error(reason === 'QUOTA_EXCEEDED' ? `已達 Spotify 用量上限，約 ${Math.ceil(wait / 60)} 分鐘後自動恢復` : `Spotify 暫時限制請求，約 ${wait} 秒後自動恢復`);
+  }
   if (!res.ok) {
     let msg = ''; try { msg = (await res.json())?.error?.message || ''; } catch (e) {}
     throw new Error('Spotify 錯誤 ' + res.status + (msg ? '：' + msg : ''));
@@ -537,7 +566,7 @@ function renderSearch(app) {
     const q = e.target.value.trim();
     clearTimeout(searchT);
     if (!q) { searchSeq++; state.results = null; state.q = ''; state.loading = false; updateSearchBody(); return; }
-    searchT = setTimeout(() => doSearch(q), 350);
+    searchT = setTimeout(() => doSearch(q), 500);
   });
   const onFocus = () => {
     if (state.searchFocus) return;
@@ -801,7 +830,8 @@ function queueArtistTotal(name, id) {
   atQueue.add(name); pumpArtistTotals(id);
 }
 async function pumpArtistTotals() {
-  while (atRunning < 2 && atQueue.size) {
+  if (cooldownLeft()) { setTimeout(pumpArtistTotals, cooldownLeft() * 1000 + 500); return; }
+  while (atRunning < 1 && atQueue.size) {
     const name = atQueue.values().next().value; atQueue.delete(name); atRunning++;
     (async () => {
       try {
@@ -816,7 +846,7 @@ async function pumpArtistTotals() {
       atRunning--;
       clearTimeout(atRenderT);
       atRenderT = setTimeout(() => { if (state.tab === 'artists' && !state.view && !state.current) render(); }, 400);
-      pumpArtistTotals();
+      setTimeout(pumpArtistTotals, 800);
     })();
   }
 }
@@ -869,7 +899,10 @@ async function renderArtist(app) {
         if (!isSpId(v.id)) v.id = await resolveArtistId(v.name);
         v.albums = v.id ? await artistAlbums(v.id) : [];
       }
-    } catch (e) { v.albums = []; v.err = e.message || '載入失敗'; }
+    } catch (e) {
+      v.albums = []; v.err = e.message || '載入失敗';
+      if (cooldownLeft()) setTimeout(() => { if (state.view === v) { delete v.albums; delete v.err; v.cached = false; render(); } }, cooldownLeft() * 1000 + 300);
+    }
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
@@ -1164,7 +1197,7 @@ document.addEventListener('click', async e => {
     case 'back': state.view = null; return render();
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
-    case 'artistRetry': if (state.view) { cache.clear(); delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
+    case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
     case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
@@ -1181,7 +1214,7 @@ document.addEventListener('click', async e => {
   }
 });
 // 每次切回 App：同步資料，並重新抓 Spotify 最近播放
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncNow(); if (spOn()) loadSpotifyHome(true); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncNow(); if (spOn() && Date.now() - (state.sp.loadedAt || 0) > 30000) loadSpotifyHome(true); } });
 $('#scrim').onclick = () => closeSheet();
 // 面板打開時，在背景遮罩上滑動不會捲動底下的頁面
 $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
