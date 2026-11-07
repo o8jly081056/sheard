@@ -267,10 +267,18 @@ async function syncNow(manual) {
   syncing = true; state.syncErr = ''; updateDot();
   try {
     // 1. 拉下雲端全部資料，時間較新的覆蓋本機
+    let metaChanged = false;
     for (let from = 0; ; from += 1000) {
       const { data, error } = await sb.from('albums').select('key,data,deleted,updated_at').range(from, from + 999);
       if (error) throw error;
       data.forEach(r => {
+        if (r.key === META_RS) {             // 最近搜尋：時間較新的一方為準
+          const ts = Number(r.updated_at);
+          if (ts > recentSearchesAt) { applyRemoteRecentSearches(r.data?.items, ts); delete db.dirty[META_RS]; metaChanged = true; }
+          else if (ts === recentSearchesAt) delete db.dirty[META_RS];
+          return;
+        }
+        if (r.key.startsWith('__meta:')) return;
         const k = r.key, localTs = db.albums[k]?.updatedAt ?? db.deleted[k] ?? 0, ts = Number(r.updated_at);
         if (ts > localTs) {
           if (r.deleted) { delete db.albums[k]; db.deleted[k] = ts; } else { db.albums[k] = r.data; delete db.deleted[k]; }
@@ -280,7 +288,9 @@ async function syncNow(manual) {
       if (data.length < 1000) break;
     }
     // 2. 推上本機有改過的
-    const rows = Object.keys(db.dirty).map(k => db.albums[k]
+    const rows = Object.keys(db.dirty).map(k => k === META_RS
+      ? { user_id: sbUser.id, key: k, data: { items: recentSearches }, deleted: false, updated_at: recentSearchesAt || Date.now() }
+      : db.albums[k]
       ? { user_id: sbUser.id, key: k, data: db.albums[k], deleted: false, updated_at: db.albums[k].updatedAt || Date.now() }
       : { user_id: sbUser.id, key: k, data: {}, deleted: true, updated_at: db.deleted[k] || Date.now() });
     for (let i = 0; i < rows.length; i += 500) {
@@ -291,9 +301,11 @@ async function syncNow(manual) {
     }
     db.lastSync = Date.now(); save();
     if (manual) toast('✓ 已同步');
+    if (metaChanged && state.searchFocus && !state.q) updateSearchBody();
   } catch (e) { state.syncErr = e.message || String(e); if (manual) toast('同步失敗'); console.warn(e); }
   syncing = false;
-  if (!state.current) render(); else updateDot();
+  if (state.current || (state.tab === 'search' && !state.view)) { updateDot(); if (state.tab === 'search' && !state.view && !state.current && !state.searchFocus) updateSearchBody(); }
+  else render();
 }
 function updateDot() {
   const d = $('#syncDot'); if (!d) return;
@@ -404,9 +416,19 @@ function searchBodyHTML() {
     ${albums.length ? `<div class="section-h"><span>專輯</span></div><div class="grid">${albums.map(a => albumCard(a)).join('')}</div>` : ''}`;
 }
 /* ---------- 最近搜尋（像 Spotify：記錄從搜尋結果點開的專輯／歌手，存在這台裝置） ---------- */
-const RS_KEY = 'heard.recentSearches', RS_MAX = 20;
+// 跨裝置同步：存在雲端 albums 表的一列特殊資料（key = META_RS），不會被當成專輯
+const RS_KEY = 'heard.recentSearches', RS_AT = 'heard.recentSearchesAt', RS_MAX = 20, META_RS = '__meta:recentSearches';
 let recentSearches = (() => { try { return JSON.parse(localStorage.getItem(RS_KEY)) || []; } catch (e) { return []; } })();
-function saveRecentSearches() { try { localStorage.setItem(RS_KEY, JSON.stringify(recentSearches)); } catch (e) {} }
+let recentSearchesAt = +(localStorage.getItem(RS_AT) || 0);
+function saveRecentSearches() {
+  recentSearchesAt = Date.now();
+  try { localStorage.setItem(RS_KEY, JSON.stringify(recentSearches)); localStorage.setItem(RS_AT, String(recentSearchesAt)); } catch (e) {}
+  db.dirty[META_RS] = 1; save(); scheduleSync();
+}
+function applyRemoteRecentSearches(items, ts) {
+  recentSearches = Array.isArray(items) ? items.slice(0, RS_MAX) : []; recentSearchesAt = ts;
+  try { localStorage.setItem(RS_KEY, JSON.stringify(recentSearches)); localStorage.setItem(RS_AT, String(ts)); } catch (e) {}
+}
 function addRecentSearch(item) {
   const id = item.type + ':' + (item.type === 'album' ? item.key : norm(item.name));
   recentSearches = [{ ...item, id }, ...recentSearches.filter(x => x.id !== id)].slice(0, RS_MAX);
@@ -924,6 +946,7 @@ function openMenu() {
     if (!data.session) { L.err = '註冊成功，但需要先到信箱點確認信。若不想收信，請到 Supabase 關閉 Confirm email。'; return openMenu(); }
     sbUser = data.user; state.login = {};
     Object.keys(db.albums).forEach(k => db.dirty[k] = 1); // 第一次登入：把本機全部推上去
+    if (recentSearchesAt) db.dirty[META_RS] = 1;
     Object.keys(db.deleted).forEach(k => db.dirty[k] = 1);
     save(); toast('✓ 已登入，開始同步'); openMenu(); await syncNow(); if ($('#sheet').classList.contains('show')) openMenu();
   };
