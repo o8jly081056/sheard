@@ -481,8 +481,8 @@ function renderSearch(app) {
   });
   const onFocus = () => {
     if (state.searchFocus) return;
-    state.searchFocus = true; $('.search-row').classList.add('focus'); $('#app').classList.add('search-mode');
-    if (!state.q) updateSearchBody();
+    state.searchFocus = true;
+    enterSearchMode();
   };
   $('#q').addEventListener('focus', onFocus);
   $('#q').addEventListener('pointerdown', onFocus);
@@ -492,8 +492,48 @@ function endSearch() {
   clearTimeout(searchT); searchSeq++;
   state.searchFocus = false; state.results = null; state.q = ''; state.loading = false;
   const q = $('#q'); if (q) { q.value = ''; q.blur(); }
-  $('.search-row')?.classList.remove('focus'); $('#app').classList.remove('search-mode');
-  updateSearchBody();
+  exitSearchMode();
+}
+/* 搜尋轉場（FLIP）：先用 transform 把搜尋列和內容滑上去、標題淡出，動畫結束才真正收起標題，
+   全程不改版面高度，所以不會掉幀。時間與曲線比照 iOS：0.26 秒、cubic-bezier(.25,.8,.25,1) */
+const SM_MS = 260, SM_EASE = 'cubic-bezier(.25,.8,.25,1)';
+let smT = null;
+function smEls() { return { app: $('#app'), head: $('.home-head'), row: $('.search-row'), res: $('#sres') }; }
+function smClear(...els) { els.forEach(e => { if (e) { e.style.transition = ''; e.style.transform = ''; e.style.opacity = ''; } }); }
+function enterSearchMode() {
+  const { app, head, row, res } = smEls(); if (!head || !row) return;
+  clearTimeout(smT);
+  const h = head.offsetHeight + parseFloat(getComputedStyle(head.firstElementChild).marginBottom || 0);
+  row.classList.add('focus');
+  if (!state.q) { res.style.opacity = '0'; res.innerHTML = searchBodyHTML(); }
+  void row.offsetHeight;
+  head.style.transition = `opacity ${SM_MS * .6}ms ${SM_EASE}, transform ${SM_MS}ms ${SM_EASE}`;
+  head.style.opacity = '0'; head.style.transform = 'translateY(-10px)';
+  [row, res].forEach(e => { e.style.transition = `transform ${SM_MS}ms ${SM_EASE}, opacity ${SM_MS}ms ${SM_EASE}`; e.style.transform = `translateY(${-h}px)`; });
+  res.style.opacity = '1';
+  smT = setTimeout(() => {               // 動畫結束：真正收起標題，同一格移除位移，畫面不會跳
+    [head, row, res].forEach(e => { e.style.transition = 'none'; });
+    app.classList.add('search-mode');
+    smClear(head, row, res);
+  }, SM_MS + 20);
+}
+function exitSearchMode() {
+  const { app, head, row, res } = smEls();
+  clearTimeout(smT);
+  if (!head || !row) { app.classList.remove('search-mode'); return updateSearchBody(); }
+  [head, row, res].forEach(e => { e.style.transition = 'none'; });
+  app.classList.remove('search-mode');
+  row.classList.remove('focus');
+  const h = head.offsetHeight + parseFloat(getComputedStyle(head.firstElementChild).marginBottom || 0);
+  head.style.opacity = '0'; head.style.transform = 'translateY(-10px)';
+  row.style.transform = res.style.transform = `translateY(${-h}px)`;
+  res.style.opacity = '0'; res.innerHTML = searchBodyHTML();
+  void row.offsetHeight;
+  head.style.transition = `opacity ${SM_MS}ms ${SM_EASE}, transform ${SM_MS}ms ${SM_EASE}`;
+  [row, res].forEach(e => { e.style.transition = `transform ${SM_MS}ms ${SM_EASE}, opacity ${SM_MS}ms ${SM_EASE}`; });
+  head.style.opacity = '1'; head.style.transform = '';
+  row.style.transform = res.style.transform = ''; res.style.opacity = '1';
+  smT = setTimeout(() => smClear(head, row, res), SM_MS + 20);
 }
 
 function homeHTML() {
