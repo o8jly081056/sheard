@@ -135,6 +135,12 @@ async function searchArtists(q) {
   const m = new Map(); pages.flatMap(p => p?.artists?.items || []).filter(Boolean).forEach(x => m.set(x.id, x));
   return [...m.values()];
 }
+async function searchArtistsTop(q) {
+  const j = await spCached(`/search?type=artist&limit=10&q=${encodeURIComponent(q)}`);
+  const list = (j?.artists?.items || []).filter(Boolean);
+  const nq = norm(q);
+  return list.filter(x => norm(x.name).includes(nq) || nq.includes(norm(x.name))).sort((a, b) => (norm(b.name) === nq) - (norm(a.name) === nq));
+}
 async function artistAlbums(id, groups = 'album,single,compilation') {
   let lim = 50, out = [];
   for (let off = 0; off < 300; off += lim) {
@@ -381,32 +387,42 @@ const VIEWS = [['grid', '大圖示'], ['small', '小圖示'], ['list', '列表']
 function viewOf(st) { db.settings.view ??= {}; return db.settings.view[st] || 'grid'; }
 
 /* ---------- 首頁（搜尋＋最近播放） ---------- */
-function renderSearch(app) {
+// 搜尋結果區塊（只更新這塊，打字時輸入框不會被重畫、鍵盤也不會收起）
+function searchBodyHTML() {
   const r = state.results;
-  let body;
-  if (state.loading) body = '<div class="spinner"></div>';
-  else if (!r) body = homeHTML();
-  else if (state.resKind === 'album') {
-    const list = remember(r.filter(a => inGroup(a, state.sf)));
-    body = list.length ? `<div class="grid">${list.map(a => albumCard(a)).join('')}</div>` : '<div class="empty">找不到結果</div>';
-  } else {
-    body = r.length ? `<div class="list">${r.map(x => {
-      const n = Object.values(db.albums).filter(a => a.status === 'heard' && norm(a.artist) === norm(x.name)).length;
-      const img = x.images?.[x.images.length - 1]?.url || x.images?.[0]?.url;
-      return `<button class="li" data-artist="${esc(x.id)}" data-name="${esc(x.name)}">
-        <div class="av">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : esc(x.name[0])}</div>
-        <div class="grow"><div class="name">${esc(x.name)}</div><div class="muted small">${esc((x.genres || []).slice(0, 2).join('、'))}${n ? `${x.genres?.length ? ' · ' : ''}已聽 ${n} 張` : ''}</div></div>
-      </button>`;
-    }).join('')}</div>` : '<div class="empty">找不到歌手</div>';
-  }
+  if (!r) return state.loading ? '<div class="spinner"></div>' : homeHTML();
+  const artists = r.artists || [], albums = remember(r.albums || []);
+  if (!artists.length && !albums.length) return state.loading ? '<div class="spinner"></div>' : '<div class="empty">找不到結果</div>';
+  const artistHTML = artists.slice(0, 3).map(x => {
+    const n = Object.values(db.albums).filter(a => isDone(a.status) && norm(a.artist) === norm(x.name)).length;
+    const img = x.images?.[x.images.length - 1]?.url || x.images?.[0]?.url;
+    return `<button class="li" data-artist="${esc(x.id)}" data-name="${esc(x.name)}">
+      <div class="av">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : esc(x.name[0])}</div>
+      <div class="grow"><div class="name">${esc(x.name)}</div><div class="muted small">歌手${n ? ` · 已聽 ${n} 張` : ''}</div></div>
+      <span class="muted">›</span></button>`;
+  }).join('');
+  return `${artists.length ? `<div class="section-h"><span>歌手</span></div><div class="list">${artistHTML}</div>` : ''}
+    ${albums.length ? `<div class="section-h"><span>專輯</span></div><div class="grid">${albums.map(a => albumCard(a)).join('')}</div>` : ''}`;
+}
+function updateSearchBody() {
+  const el = $('#sres');
+  if (el && state.tab === 'search' && !state.view) el.innerHTML = searchBodyHTML(); else render();
+}
+let searchT = null, searchSeq = 0;
+function renderSearch(app) {
   app.innerHTML = `
     <header class="top"><h1>首頁</h1>${gearBtn()}</header>
-    <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="歌手、專輯、EP…" value="${esc(state.q)}" autocomplete="off"></form>
-    ${body}`;
-  $('#sform').onsubmit = e => { e.preventDefault(); $('#q').blur(); doSearch($('#q').value.trim()); };
-  $('#q').addEventListener('search', e => { if (!e.target.value && state.results) { state.results = null; state.q = ''; render(); } });
-  $('#q').addEventListener('input', e => { if (!e.target.value && state.results) { state.results = null; state.q = ''; render(); $('#q').focus(); } });
-  if (!r && !state.loading && spOn()) loadSpotifyHome();
+    <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="歌手、專輯" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
+    <div id="sres">${searchBodyHTML()}</div>`;
+  $('#sform').onsubmit = e => { e.preventDefault(); $('#q').blur(); clearTimeout(searchT); doSearch($('#q').value.trim()); };
+  // 跟 Spotify 一樣邊打邊搜尋
+  $('#q').addEventListener('input', e => {
+    const q = e.target.value.trim();
+    clearTimeout(searchT);
+    if (!q) { searchSeq++; state.results = null; state.q = ''; state.loading = false; updateSearchBody(); return; }
+    searchT = setTimeout(() => doSearch(q), 350);
+  });
+  if (!state.results && !state.loading && spOn()) loadSpotifyHome();
 }
 
 function homeHTML() {
@@ -434,16 +450,21 @@ async function loadSpotifyHome(force) {
   const fail = res.find(x => x.status === 'rejected');
   if (fail) { s.err = fail.reason.message; s.recent ??= []; }
   spLoading = false;
-  if (state.tab === 'search' && !state.view && !state.results && !state.current) render();
+  if (state.tab === 'search' && !state.view && !state.results && !state.current) updateSearchBody();
 }
 async function doSearch(q) {
   if (!q) return;
   if (!spOn()) return toast('請先連結 Spotify');
-  state.q = q; state.loading = true; render();
-  const kind = state.sf === 'artist' ? 'artist' : 'album';
-  try { state.results = kind === 'album' ? await searchAlbums(q) : await searchArtists(q); state.resKind = kind; }
-  catch (e) { state.results = []; state.resKind = kind; toast(e.message || '連線失敗，請稍後再試'); }
-  state.loading = false; render();
+  if (q === state.q && state.results && !state.loading) return;
+  const seq = ++searchSeq;
+  state.q = q; state.loading = true;
+  if (!state.results) updateSearchBody();
+  const [al, ar] = await Promise.allSettled([searchAlbums(q), searchArtistsTop(q)]);
+  if (seq !== searchSeq) return;               // 已經有更新的搜尋，丟掉舊結果
+  state.loading = false;
+  state.results = { albums: al.status === 'fulfilled' ? al.value : [], artists: ar.status === 'fulfilled' ? ar.value : [] };
+  if (al.status === 'rejected' && ar.status === 'rejected') toast(al.reason?.message || '連線失敗，請稍後再試');
+  updateSearchBody();
 }
 
 /* ---------- 已聽過 / 想聽 ---------- */
@@ -582,12 +603,22 @@ function setArtistTotal(name, id, albums) {
   artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now() };
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
 }
+// 歌手列表與歌手頁共用：同一位歌手用同一個 Spotify id、同一套算法，數字才會一致
+function rowArtistId(name) {
+  let id = '';
+  Object.values(db.albums).forEach(a => { if (norm(a.artist) === norm(name) && a.artistId) id = a.artistId; });
+  return id;
+}
+function statsFor(name, discKeys) {
+  const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
+  const all = new Set([...discKeys, ...local.map(albumKey)]);
+  const heard = [...all].filter(k => isDone(statusOf(k))).length;
+  const want = [...all].filter(k => statusOf(k) === 'want').length;
+  return { heard, want, total: all.size, pct: all.size ? Math.round(heard / all.size * 100) : 0 };
+}
 function artistProgress(name) {
   const c = artistTotals[norm(name)]; if (!c) return null;
-  const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
-  const all = new Set([...c.keys, ...local.map(albumKey)]);
-  const heard = local.filter(a => isDone(a.status)).length;
-  return { heard, total: all.size, pct: all.size ? Math.round(heard / all.size * 100) : 0 };
+  return statsFor(name, c.keys);
 }
 const atQueue = new Set(); let atRunning = 0, atRenderT = null;
 function queueArtistTotal(name, id) {
@@ -600,9 +631,12 @@ async function pumpArtistTotals() {
     const name = atQueue.values().next().value; atQueue.delete(name); atRunning++;
     (async () => {
       try {
-        const local = Object.values(db.albums).find(a => norm(a.artist) === norm(name) && isSpId(a.artistId));
-        const id = local?.artistId || await resolveArtistId(name);
-        if (id) setArtistTotal(name, id, await artistAlbums(id));
+        const started = Date.now();
+        const rid = rowArtistId(name);
+        const id = isSpId(rid) ? rid : await resolveArtistId(name);
+        const albums = id ? await artistAlbums(id) : null;
+        // 如果這段時間使用者已經點進歌手頁更新過，就不要覆蓋
+        if (albums && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums);
       } catch (e) {}
       atRunning--;
       clearTimeout(atRenderT);
@@ -617,7 +651,7 @@ function renderArtists(app) {
   Object.values(db.albums).forEach(a => {
     const k = norm(a.artist);
     if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [], want: [] });
-    const g = map.get(k); if (a.artistId) g.id = a.artistId;
+    const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
     g[a.status === 'want' ? 'want' : 'heard'].push(a);   // 封存算在已聽過
   });
   const list = [...map.values()];
@@ -663,21 +697,24 @@ async function renderArtist(app) {
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
+  const st = statsFor(v.name, v.albums.map(albumKey));
   const keys = new Set(v.albums.map(albumKey));
   const own = remember([...v.albums, ...local.filter(a => !keys.has(albumKey(a)))]);
   const ARTIST_OPTS = RELEASES;
   const all = own.filter(a => inGroup(a, v.filter));
   const groups = v.filter ? [[v.filter, ARTIST_OPTS.find(o => o[0] === v.filter)[1]]] : RELEASES;
   const counted = all;
-  const heard = counted.filter(a => isDone(statusOf(albumKey(a)))).length;
-  const want = counted.filter(a => statusOf(albumKey(a)) === 'want').length;
-  const pct = counted.length ? Math.round(heard / counted.length * 100) : 0;
+  // 沒有篩選時直接用共用算法（跟歌手列表一致）；有篩選時算該分類
+  const heard = v.filter ? counted.filter(a => isDone(statusOf(albumKey(a)))).length : st.heard;
+  const want = v.filter ? counted.filter(a => statusOf(albumKey(a)) === 'want').length : st.want;
+  const totalN = v.filter ? counted.length : st.total;
+  const pct = totalN ? Math.round(heard / totalN * 100) : 0;
   const cover = all.find(a => a.cover)?.cover;
   app.innerHTML = `${head}
     <div class="artist-hero">
       <div class="av">${cover ? `<img src="${esc(cover)}" alt="">` : ''}</div>
       <div style="flex:1;min-width:0"><h2>${esc(v.name)}</h2>
-        <div class="row-between"><span class="muted small">聽過 ${heard} / ${counted.length} 張${want ? ` · 想聽 ${want}` : ''}</span><b style="font-size:18px">${pct}%</b></div>
+        <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張${want ? ` · 想聽 ${want}` : ''}</span><b style="font-size:18px">${pct}%</b></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
       </div>
     </div>

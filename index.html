@@ -150,7 +150,7 @@ html.sheet-open,html.sheet-open body{overflow:hidden;overscroll-behavior:none}
 .tracks{margin-top:14px;border-top:1px solid var(--line)}
 .tracks div{display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px}
 .tracks span{color:var(--fg3);width:22px;text-align:right;flex:none}
-.toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:var(--fg);color:#111;padding:10px 18px;border-radius:999px;font-weight:600;opacity:0;transition:.2s;z-index:40;pointer-events:none;white-space:nowrap}
+.toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:var(--fg);color:#111;padding:10px 18px;border-radius:999px;font-weight:600;opacity:0;transition:.2s;z-index:40;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .spinner{width:28px;height:28px;border:3px solid var(--bg3);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;margin:40px auto}
 .spinner.sm{width:20px;height:20px;margin:16px auto}
