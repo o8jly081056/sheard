@@ -55,6 +55,13 @@ header.top .sub{color:var(--fg2);font-size:13px}
 #sform input:focus{outline:none}
 #sform .s-ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#121212;opacity:1;transition:color .65s cubic-bezier(.32,.72,0,1)}
 #sform input::-webkit-search-cancel-button{-webkit-appearance:none}
+.diag{margin-top:10px;font-size:12px}
+.diag summary{color:var(--fg2);cursor:pointer;padding:6px 0}
+.diag-row{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.diag-row span{color:var(--fg3)}
+.diag-row code{color:var(--fg2);word-break:break-all;font-size:11px}
+.diag-row b{grid-column:1/-1;font-weight:600;color:var(--heard)}
+.diag-row.bad b{color:#ff8a8a}
 .s-sub{font-size:15px;font-weight:700;color:#fff;margin:16px 0 4px}
 .s-title{font-size:18px;font-weight:700;color:#fff;margin:14px 0 6px}
 .slist{display:flex;flex-direction:column}

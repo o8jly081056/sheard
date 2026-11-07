@@ -244,18 +244,40 @@ async function spotifyCallback() {
   catch (e) { toast('Spotify 連結失敗：' + e.message); }
 }
 function spotifyLogout() { spTok = null; localStorage.removeItem(SP_KEY); state.sp = {}; }
+// 診斷紀錄：最近 20 次 Spotify 請求的路徑、狀態、筆數、錯誤訊息（只存在這台裝置，方便找問題）
+const spLog = (() => { try { return JSON.parse(localStorage.getItem('heard.spLog')) || []; } catch (e) { return []; } })();
+function logSp(entry) {
+  spLog.unshift({ t: Date.now(), ...entry }); spLog.length = Math.min(spLog.length, 20);
+  try { localStorage.setItem('heard.spLog', JSON.stringify(spLog)); } catch (e) {}
+}
+function countOf(j) {
+  if (!j) return '無內容';
+  const parts = [];
+  if (j.albums) parts.push(`專輯 ${j.albums.items?.length ?? 0}/${j.albums.total ?? '?'}`);
+  if (j.artists && !j.name) parts.push(`歌手 ${j.artists.items?.length ?? 0}/${j.artists.total ?? '?'}`);
+  if (Array.isArray(j.items)) parts.push(`項目 ${j.items.length}/${j.total ?? '?'}`);
+  if (j.name) parts.push(j.name);
+  return parts.join('、') || '有回應';
+}
 async function sp(path, retry = true) {
-  if (!spTok) throw new Error('not connected');
+  try { const j = await spRaw(path, retry); logSp({ path, ok: true, info: countOf(j) }); return j; }
+  catch (e) { logSp({ path, ok: false, info: e.message }); throw e; }
+}
+async function spRaw(path, retry = true) {
+  if (!spTok) throw new Error('尚未連結 Spotify');
   if (!spTok.access || Date.now() > spTok.exp) {
     try { await spTokenReq({ grant_type: 'refresh_token', refresh_token: spTok.refresh }); }
     catch (e) { spotifyLogout(); render(); throw new Error('Spotify 登入已過期，請重新連結'); }
   }
   const res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access } });
   if (res.status === 204) return null;
-  if (res.status === 401 && retry) { spTok.exp = 0; return sp(path, false); }
+  if (res.status === 401 && retry) { spTok.exp = 0; return spRaw(path, false); }
   if (res.status === 403) throw new Error('Spotify 拒絕存取：請確認你的帳號已加入開發者後台的 User Management，且 App 擁有者有 Premium');
   if (res.status === 429) throw new Error('Spotify 請求太頻繁，稍後再試');
-  if (!res.ok) throw new Error('Spotify 錯誤 ' + res.status);
+  if (!res.ok) {
+    let msg = ''; try { msg = (await res.json())?.error?.message || ''; } catch (e) {}
+    throw new Error('Spotify 錯誤 ' + res.status + (msg ? '：' + msg : ''));
+  }
   return res.json();
 }
 async function spNowPlaying() {
@@ -1010,7 +1032,9 @@ function openMenu() {
         </form>
         ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>`;
   const spBlock = !CFG.SPOTIFY_CLIENT_ID ? '<div class="muted small">尚未設定 Spotify（見 SETUP.md）</div>'
-    : spOn() ? `<div class="panel row-between"><span>✓ 已連結 Spotify</span><button class="btn sm" data-act="spLogout">中斷連結</button></div>`
+    : spOn() ? `<div class="panel row-between"><span>✓ 已連結 Spotify</span><button class="btn sm" data-act="spLogout">中斷連結</button></div>
+      <details class="diag"><summary>連線診斷（最近 ${spLog.length} 次請求）</summary>${spLog.map(x => `<div class="diag-row ${x.ok ? '' : 'bad'}">
+        <span>${new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false })}</span><code>${esc(decodeURIComponent(x.path).slice(0, 90))}</code><b>${esc(x.info)}</b></div>`).join('') || '<div class="muted small">還沒有紀錄</div>'}</details>`
     : `<button class="btn primary" data-act="spLogin">連結 Spotify</button>`;
   $('#sheet').innerHTML = `<div class="grab"></div>
     <h2 style="margin:0">設定</h2>
