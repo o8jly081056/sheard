@@ -816,7 +816,6 @@ function renderSheet() {
   });
   const st = saved?.status || null;
   const tracks = seen.get(k)?._tracks;
-  const spotify = a.spotifyId ? `https://open.spotify.com/album/${a.spotifyId}` : `https://open.spotify.com/search/${encodeURIComponent(a.artist + ' ' + a.title)}`;
   $('#sheet').innerHTML = `<div class="grab"></div><div class="detail">
     ${state.npKey === k && state.sp.np ? `<div style="text-align:center;margin:-4px 0 10px" class="small muted">${state.sp.np.playing ? '<span class="eq"><i></i><i></i><i></i></span>正在播放' : '⏸ 暫停中'}：${esc(state.sp.np.track)}</div>` : ''}
     <div class="detail-cover">${a.cover ? `<img src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:60px">♪</div>'}</div>
@@ -827,9 +826,6 @@ function renderSheet() {
       <button class="big-btn ${st === 'want' ? 'want' : ''}" data-want="${esc(k)}">${st === 'want' ? I.markOn : I.mark} 想聽</button>
       <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${I.archive} 封存</button>
       <button class="big-btn ${st === 'heard' ? 'heard' : 'solid'}" data-heard="${esc(k)}">${I.check} 已聽過</button>
-    </div>
-    <div class="btn-row">
-      <a class="btn primary" href="${spotify}" target="_blank" rel="noopener">在 Spotify 開啟</a>
     </div>
     <div class="tracks${tracks?.length ? ' in' : ''}" id="sheetTracks">${tracksHTML(tracks)}</div>
   </div>`;
