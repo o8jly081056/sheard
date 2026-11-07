@@ -286,25 +286,32 @@ async function sp(path, retry = true) {
   try { const j = await spRaw(path, retry); logSp({ path, ok: true, info: countOf(j) }); return j; }
   catch (e) { logSp({ path, ok: false, info: e.message }); throw e; }
 }
-let spCooldownUntil = 0;
+// 被 Spotify 限流時的冷卻：記在手機上（重開 App 不會重置），連續被擋會逐次加長：30 秒 → 2 分 → 8 分 → 30 分 → 1 小時
+const COOL_KEY = 'heard.spCool';
+let { until: spCooldownUntil = 0, strikes: spStrikes = 0 } = (() => { try { return JSON.parse(localStorage.getItem(COOL_KEY)) || {}; } catch (e) { return {}; } })();
+const saveCool = () => { try { localStorage.setItem(COOL_KEY, JSON.stringify({ until: spCooldownUntil, strikes: spStrikes })); } catch (e) {} };
 const cooldownLeft = () => Math.max(0, Math.ceil((spCooldownUntil - Date.now()) / 1000));
+const fmtWait = sec => sec >= 60 ? `${Math.ceil(sec / 60)} 分鐘` : `${sec} 秒`;
 async function spRaw(path, retry = true) {
   if (!spTok) throw new Error('尚未連結 Spotify');
-  if (cooldownLeft()) throw new Error(`Spotify 暫時限制請求，約 ${cooldownLeft()} 秒後自動恢復`);
+  if (cooldownLeft()) throw new Error(`Spotify 暫時限制請求，約 ${fmtWait(cooldownLeft())}後自動恢復`);
   if (!spTok.access || Date.now() > spTok.exp) {
     try { await spTokenReq({ grant_type: 'refresh_token', refresh_token: spTok.refresh }); }
     catch (e) { spotifyLogout(); render(); throw new Error('Spotify 登入已過期，請重新連結'); }
   }
   const res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access } });
+  if (res.ok && spStrikes) { spStrikes = 0; saveCool(); }
   if (res.status === 204) return null;
   if (res.status === 401 && retry) { spTok.exp = 0; return spRaw(path, false); }
   if (res.status === 403) throw new Error('Spotify 拒絕存取：請確認你的帳號已加入開發者後台的 User Management，且 App 擁有者有 Premium');
   if (res.status === 429) {
     let reason = ''; try { reason = (await res.json())?.reason || ''; } catch (e) {}
     const ra = +(res.headers.get('Retry-After') || 0);
-    const wait = ra > 0 ? ra : reason === 'QUOTA_EXCEEDED' ? 600 : 30;
-    spCooldownUntil = Date.now() + wait * 1000;
-    throw new Error(reason === 'QUOTA_EXCEEDED' ? `已達 Spotify 用量上限，約 ${Math.ceil(wait / 60)} 分鐘後自動恢復` : `Spotify 暫時限制請求，約 ${wait} 秒後自動恢復`);
+    spStrikes++;
+    const backoff = Math.min(3600, 30 * Math.pow(4, spStrikes - 1));
+    const wait = Math.max(ra, backoff, reason === 'QUOTA_EXCEEDED' ? 600 : 0);
+    spCooldownUntil = Date.now() + wait * 1000; saveCool();
+    throw new Error((reason === 'QUOTA_EXCEEDED' ? '已達 Spotify 用量上限' : 'Spotify 暫時限制請求') + `，約 ${fmtWait(wait)}後自動恢復（Retry-After：${ra || '未提供'}，第 ${spStrikes} 次）`);
   }
   if (!res.ok) {
     let msg = ''; try { msg = (await res.json())?.error?.message || ''; } catch (e) {}
@@ -566,7 +573,7 @@ function renderSearch(app) {
     const q = e.target.value.trim();
     clearTimeout(searchT);
     if (!q) { searchSeq++; state.results = null; state.q = ''; state.loading = false; updateSearchBody(); return; }
-    searchT = setTimeout(() => doSearch(q), 500);
+    searchT = setTimeout(() => doSearch(q), 700);
   });
   const onFocus = () => {
     if (state.searchFocus) return;
@@ -823,7 +830,7 @@ function artistProgress(name) {
   const c = artistTotals[norm(name)]; if (!c) return null;
   return statsFor(name, c.keys);
 }
-const atQueue = new Set(); let atRunning = 0, atRenderT = null;
+const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0;
 function queueArtistTotal(name, id) {
   const c = artistTotals[norm(name)];
   if (!spOn() || atQueue.has(name) || (c && Date.now() - c.at < AT_TTL && c.img !== undefined)) return;
@@ -831,7 +838,9 @@ function queueArtistTotal(name, id) {
 }
 async function pumpArtistTotals() {
   if (cooldownLeft()) { setTimeout(pumpArtistTotals, cooldownLeft() * 1000 + 500); return; }
+  if (atDone >= 8) return;
   while (atRunning < 1 && atQueue.size) {
+    atDone++;
     const name = atQueue.values().next().value; atQueue.delete(name); atRunning++;
     (async () => {
       try {
@@ -846,7 +855,7 @@ async function pumpArtistTotals() {
       atRunning--;
       clearTimeout(atRenderT);
       atRenderT = setTimeout(() => { if (state.tab === 'artists' && !state.view && !state.current) render(); }, 400);
-      setTimeout(pumpArtistTotals, 800);
+      setTimeout(pumpArtistTotals, 4000);
     })();
   }
 }
