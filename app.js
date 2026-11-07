@@ -63,7 +63,7 @@ function setStatus(k, status) {
   } else {
     const a = findAlbum(k); if (!a) return;
     const { _tracks, ...clean } = a;
-    db.albums[k] = { ...clean, status, addedAt: now, updatedAt: now, heardAt: status === 'heard' ? now : null, rating: 0, note: '' };
+    db.albums[k] = { ...clean, status, addedAt: now, updatedAt: now, heardAt: status === 'heard' ? now : null };
     delete db.deleted[k];
   }
   db.dirty[k] = 1; save(); scheduleSync();
@@ -96,8 +96,7 @@ async function toggle(k, status) {
   // 取消標記，或把「已聽過」改成其他狀態時，先確認
   if (a && (was === status || was === 'heard')) {
     const removing = was === status;
-    const extra = removing && a.manual ? '<br><b>這是手動新增的唱片，取消後整筆資料會刪除。</b>'
-      : removing && (a.rating || a.note) ? '<br>評分和筆記也會一起清除。' : '';
+    const extra = removing && a.manual ? '<br><b>這是手動新增的唱片，取消後整筆資料會刪除。</b>' : '';
     const ok = await ask({
       title: removing ? `取消「${statusName(was)}」？` : `從「已聽過」改成「${statusName(status)}」？`,
       msg: `<b>${esc(a.title)}</b><br><span class="muted">${esc(a.artist)}</span>${extra}`,
@@ -367,14 +366,13 @@ function albumCard(a, no) {
 /* 列表式的一列 */
 function albumRow(a, no) {
   const k = albumKey(a), s = statusOf(k);
-  const stars = s === 'heard' && a.rating ? `<span class="row-stars">${'★'.repeat(a.rating)}</span>` : '';
   return `<div class="arow" data-open="${esc(k)}">
     <span class="arow-no">${no}</span>
     <div class="arow-cover">${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:20px">♪</div>'}</div>
     <div class="arow-main">
       <div class="arow-t">${esc(a.title)}</div>
       <div class="arow-a">${esc(a.artist)}</div>
-      <div class="arow-m">${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}${stars}</div>
+      <div class="arow-m">${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}</div>
     </div>
     <div class="arow-acts">
       ${!isDone(s) ? `<button class="mini ${s === 'want' ? 'want' : ''}" data-want="${esc(k)}" aria-label="想聽">${s === 'want' ? I.markOn : I.mark}</button>` : ''}
@@ -555,7 +553,7 @@ async function deleteArtist(name) {
   const parts = [['heard', '已聽過'], ['want', '想聽'], ['archived', '封存']].filter(([st]) => n(st)).map(([st, l]) => `${l} ${n(st)}`);
   const ok = await ask({
     title: `刪除「${name}」？`,
-    msg: `會移除這位歌手全部 ${albums.length} 張的標記（${parts.join('、')}），評分和筆記也會一起清除，無法復原。`,
+    msg: `會移除這位歌手全部 ${albums.length} 張的標記（${parts.join('、')}），無法復原。`,
     ok: '刪除', cancel: '取消'
   });
   if (!ok) { closeSwipes(); return; }
@@ -830,15 +828,11 @@ function renderSheet() {
       <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${I.archive} 封存</button>
       <button class="big-btn ${st === 'heard' ? 'heard' : 'solid'}" data-heard="${esc(k)}">${I.check} 已聽過</button>
     </div>
-    ${st === 'heard' ? `
-      <div class="stars">${[1, 2, 3, 4, 5].map(n => `<button class="${(a.rating || 0) >= n ? 'on' : ''}" data-star="${n}" aria-label="${n} 星">★</button>`).join('')}</div>` : ''}
-    ${st ? `<div class="field"><label>筆記</label><textarea id="note" rows="3" placeholder="${st === 'heard' ? '喜歡哪幾首？什麼時候聽的？' : '誰推薦的？為什麼想聽？'}">${esc(a.note || '')}</textarea></div>` : ''}
     <div class="btn-row">
       <a class="btn primary" href="${spotify}" target="_blank" rel="noopener">在 Spotify 開啟</a>
     </div>
     <div class="tracks${tracks?.length ? ' in' : ''}" id="sheetTracks">${tracksHTML(tracks)}</div>
   </div>`;
-  const note = $('#note'); if (note) note.onchange = e => { db.albums[k].note = e.target.value; touch(k); toast('已儲存筆記'); };
 }
 
 /* ================= 設定選單 ================= */
@@ -944,7 +938,7 @@ document.addEventListener('click', async e => {
   if (!swRow) closeSwipes();
   const del = e.target.closest('[data-delartist]');
   if (del) return deleteArtist(del.dataset.delartist);
-  const t = e.target.closest('[data-heard],[data-want],[data-arch],[data-open],[data-name],[data-tab],[data-f],[data-sort],[data-view],[data-star],[data-act]');
+  const t = e.target.closest('[data-heard],[data-want],[data-arch],[data-open],[data-name],[data-tab],[data-f],[data-sort],[data-view],[data-act]');
   if (!t) return;
   const d = t.dataset;
   if (d.heard !== undefined) { e.stopPropagation(); return toggle(d.heard, 'heard'); }
@@ -973,7 +967,6 @@ document.addEventListener('click', async e => {
   }
   if (d.view) { db.settings.view ??= {}; db.settings.view[state.tab] = d.view; save(); return render(); }
   if (d.sort) { setSort(state.tab, d.sort); hideSheet(); window.scrollTo(0, 0); return render(); }
-  if (d.star) { const a = db.albums[state.current]; a.rating = a.rating == +d.star ? 0 : +d.star; touch(state.current); return renderSheet(); }
   switch (d.act) {
     case 'back': state.view = null; return render();
     case 'clear': state.results = null; state.q = ''; return render();
