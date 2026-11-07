@@ -35,6 +35,12 @@ function load() {
   } catch (e) {}
   return d;
 }
+// 想聽功能已移除：把舊的想聽資料刪掉（會同步刪除雲端）
+function purgeWant() {
+  const now = Date.now(); let n = 0;
+  Object.keys(db.albums).forEach(k => { if (db.albums[k].status === 'want') { delete db.albums[k]; db.deleted[k] = now; db.dirty[k] = 1; n++; } });
+  return n;
+}
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast('儲存失敗'); } }
 const statusOf = k => db.albums[k]?.status || null;
 
@@ -50,7 +56,7 @@ function fromSpotify(al) {
   };
 }
 
-/* 設定狀態：'heard' | 'want' | null(移除) */
+/* 設定狀態：'heard' | 'archived' | null(移除) */
 function setStatus(k, status) {
   const cur = db.albums[k];
   const now = Date.now();
@@ -87,7 +93,7 @@ function ask({ title, msg = '', ok = '確定', cancel = '保留' }) {
     requestAnimationFrame(() => el.classList.add('show'));
   });
 }
-const statusName = s => ({ heard: '已聽過', want: '想聽', archived: '封存' })[s] || s;
+const statusName = s => ({ heard: '已聽過', archived: '封存' })[s] || s;
 // 「完成」：已聽過或封存，進度條都算進去
 const isDone = s => s === 'heard' || s === 'archived';
 async function toggle(k, status) {
@@ -105,8 +111,8 @@ async function toggle(k, status) {
     if (!ok) return;
   }
   if (setStatus(k, was === status ? null : status) === false) return;
-  toast(was === status ? ({ heard: '已取消「已聽過」', want: '已移出想聽', archived: '已取消封存' })[status]
-    : ({ heard: '✓ 已聽過', want: '已加入想聽', archived: '已封存' })[status]);
+  toast(was === status ? ({ heard: '已取消「已聽過」', archived: '已取消封存' })[status]
+    : ({ heard: '✓ 已聽過', archived: '已封存' })[status]);
   if (state.current) renderSheet();
   render();
 }
@@ -133,6 +139,13 @@ async function searchArtists(q) {
   if (pages.every(p => !p)) throw new Error('搜尋失敗');
   const m = new Map(); pages.flatMap(p => p?.artists?.items || []).filter(Boolean).forEach(x => m.set(x.id, x));
   return [...m.values()];
+}
+// 歌手頭貼：直接用 Spotify 上的歌手照片（取中等尺寸約 320px）
+async function artistImage(id) {
+  if (!isSpId(id)) return '';
+  const j = await spCached('/artists/' + id);
+  const im = j?.images || [];
+  return (im.find(x => (x.width || 0) >= 200 && (x.width || 0) <= 400) || im[0] || {}).url || '';
 }
 async function searchArtistsTop(q) {
   const j = await spCached(`/search?type=artist&limit=10&q=${encodeURIComponent(q)}`);
@@ -281,8 +294,9 @@ async function syncNow(manual) {
         if (r.key.startsWith('__meta:')) return;
         const k = r.key, localTs = db.albums[k]?.updatedAt ?? db.deleted[k] ?? 0, ts = Number(r.updated_at);
         if (ts > localTs) {
-          if (r.deleted) { delete db.albums[k]; db.deleted[k] = ts; } else { db.albums[k] = r.data; delete db.deleted[k]; }
-          delete db.dirty[k];
+          if (r.deleted) { delete db.albums[k]; db.deleted[k] = ts; delete db.dirty[k]; }
+          else if (r.data?.status === 'want') { delete db.albums[k]; db.deleted[k] = Date.now(); db.dirty[k] = 1; }
+          else { db.albums[k] = r.data; delete db.deleted[k]; delete db.dirty[k]; }
         } else if (ts === localTs) delete db.dirty[k];
       });
       if (data.length < 1000) break;
@@ -356,7 +370,7 @@ function render() {
   const app = $('#app');
   if (state.view?.type === 'artist') return renderArtist(app);
   if (state.view?.type === 'archive') return renderArchive(app);
-  ({ search: renderSearch, heard: renderLib, want: renderLib, artists: renderArtists })[state.tab](app);
+  ({ search: renderSearch, heard: renderLib, artists: renderArtists })[state.tab](app);
 }
 
 function albumCard(a, no) {
@@ -366,13 +380,12 @@ function albumCard(a, no) {
       ${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph">♪</div>'}
       ${a.type !== 'Album' ? `<span class="badge">${typeLabel(a.type)}</span>` : ''}
       <div class="acts">
-        ${!isDone(s) ? `<button class="mini ${s === 'want' ? 'want' : ''}" data-want="${esc(k)}" aria-label="想聽">${s === 'want' ? I.markOn : I.mark}</button>` : ''}
         ${s !== 'heard' ? `<button class="mini ${s === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}" aria-label="封存">${I.archive}</button>` : ''}
         <button class="mini ${s === 'heard' ? 'heard' : ''}" data-heard="${esc(k)}" aria-label="已聽過">${s === 'heard' ? I.check : I.check}</button>
       </div>
     </div>
     <div class="t">${no ? `<span class="no">#${no}</span>` : ''}${esc(a.title)}</div>
-    <div class="a">${s === 'heard' ? '<span class="lbl-w"><span class="lbl heard">✓ 已聽過</span> · </span>' : s === 'want' ? '<span class="lbl-w"><span class="lbl want">想聽</span> · </span>' : s === 'archived' ? '<span class="lbl-w"><span class="lbl arch">已封存</span> · </span>' : ''}${esc(a.artist)}${a.year ? ' · ' + a.year : ''}</div>
+    <div class="a">${s === 'heard' ? '<span class="lbl-w"><span class="lbl heard">✓ 已聽過</span> · </span>' : s === 'archived' ? '<span class="lbl-w"><span class="lbl arch">已封存</span> · </span>' : ''}${esc(a.artist)}${a.year ? ' · ' + a.year : ''}</div>
   </div>`;
 }
 
@@ -388,7 +401,6 @@ function albumRow(a, no) {
       <div class="arow-m">${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}</div>
     </div>
     <div class="arow-acts">
-      ${!isDone(s) ? `<button class="mini ${s === 'want' ? 'want' : ''}" data-want="${esc(k)}" aria-label="想聽">${s === 'want' ? I.markOn : I.mark}</button>` : ''}
         ${s !== 'heard' ? `<button class="mini ${s === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}" aria-label="封存">${I.archive}</button>` : ''}
       <button class="mini ${s === 'heard' ? 'heard' : ''}" data-heard="${esc(k)}" aria-label="已聽過">${s === 'heard' ? I.check : I.check}</button>
     </div>
@@ -437,7 +449,7 @@ function sRowAlbum(a, k, extra = '') {
   const s = statusOf(k);
   return `<div class="srow${s === 'archived' ? ' is-arch' : ''}" data-open="${esc(k)}"${extra}>
     <div class="srow-img">${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:22px">♪</div>'}</div>
-    <div class="srow-txt"><div class="srow-t">${esc(a.title)}</div><div class="srow-s">${s === 'heard' ? '<span class="lbl heard">已聽過</span> • ' : s === 'want' ? '<span class="lbl want">想聽</span> • ' : s === 'archived' ? '<span class="lbl arch">已封存</span> • ' : ''}${typeLabel(a.type)} • ${esc(a.artist)}</div></div>`;
+    <div class="srow-txt"><div class="srow-t">${esc(a.title)}</div><div class="srow-s">${s === 'heard' ? '<span class="lbl heard">已聽過</span> • ' : s === 'archived' ? '<span class="lbl arch">已封存</span> • ' : ''}${typeLabel(a.type)} • ${esc(a.artist)}</div></div>`;
 }
 function sRowArtist(name, id, img, extra = '') {
   return `<div class="srow" data-artist="${esc(id || '')}" data-name="${esc(name)}"${extra}>
@@ -445,7 +457,6 @@ function sRowArtist(name, id, img, extra = '') {
     <div class="srow-txt"><div class="srow-t">${esc(name)}</div><div class="srow-s">歌手</div></div>`;
 }
 const albumActs = k => { const s = statusOf(k); return `<div class="srow-acts">
-  ${!isDone(s) ? `<button class="mini ${s === 'want' ? 'want' : ''}" data-want="${esc(k)}" aria-label="想聽">${s === 'want' ? I.markOn : I.mark}</button>` : ''}
   ${s !== 'heard' ? `<button class="mini ${s === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}" aria-label="封存">${I.archive}</button>` : ''}
   <button class="mini ${s === 'heard' ? 'heard' : ''}" data-heard="${esc(k)}" aria-label="已聽過">${I.check}</button></div>`; };
 function recentSearchHTML() {
@@ -578,7 +589,7 @@ async function doSearch(q) {
   updateSearchBody();
 }
 
-/* ---------- 已聽過 / 想聽 ---------- */
+/* ---------- 已聽過 ---------- */
 function renderLib(app) {
   const status = state.tab;
   let list = Object.values(db.albums).filter(a => a.status === status);
@@ -590,8 +601,8 @@ function renderLib(app) {
   remember(list);
   const isH = status === 'heard';
   app.innerHTML = `
-    <header class="top"><div><h1>${isH ? '已聽過' : '想聽'}</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${gearBtn()}</header>
-    ${total ? `<div class="search">${I.search}<input id="lq" type="search" placeholder="在${isH ? '已聽過' : '想聽'}裡搜尋" value="${esc(state.libQ)}"></div>
+    <header class="top"><div><h1>已聽過</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${gearBtn()}</header>
+    ${total ? `<div class="search">${I.search}<input id="lq" type="search" placeholder="在已聽過裡搜尋" value="${esc(state.libQ)}"></div>
     ${chipBar('lib', RELEASES, state.libFilter)}
     <div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label(status)}</span></button>
@@ -599,7 +610,7 @@ function renderLib(app) {
     </div>
     ${!list.length ? '<div class="empty">沒有符合的唱片</div>'
       : `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`}`
-    : `<div class="empty"><b>${isH ? '還沒有已聽過的唱片' : '想聽清單是空的'}</b>到「首頁」找專輯，點 <span class="inline-ic">${isH ? I.check : I.mark}</span> ${isH ? '標記已聽過' : '加入想聽'}</div>`}
+    : `<div class="empty"><b>還沒有已聽過的唱片</b>到「首頁」找專輯，點 <span class="inline-ic">${I.check}</span> 標記已聽過</div>`}
     ${isH && archiveCount() ? `<button class="archive-link" data-act="archive">${I.archive}已封存 ${archiveCount()} 張 ›</button>` : ''}`;
   const lq = $('#lq'); if (lq) lq.oninput = e => { state.libQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#lq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
@@ -653,12 +664,12 @@ function renderArchive(app) {
 const archiveCount = () => Object.values(db.albums).filter(a => a.status === 'archived').length;
 
 /* ---------- 歌手 ---------- */
-// 刪除歌手＝移除這位歌手所有的標記（已聽過／想聽／封存），會同步到雲端
+// 刪除歌手＝移除這位歌手所有的標記（已聽過／封存），會同步到雲端
 async function deleteArtist(name) {
   const albums = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
   if (!albums.length) return;
   const n = st => albums.filter(a => a.status === st).length;
-  const parts = [['heard', '已聽過'], ['want', '想聽'], ['archived', '封存']].filter(([st]) => n(st)).map(([st, l]) => `${l} ${n(st)}`);
+  const parts = [['heard', '已聽過'], ['archived', '封存']].filter(([st]) => n(st)).map(([st, l]) => `${l} ${n(st)}`);
   const ok = await ask({
     title: `刪除「${name}」？`,
     msg: `會移除這位歌手全部 ${albums.length} 張的標記（${parts.join('、')}），無法復原。`,
@@ -704,8 +715,9 @@ function closeSwipes(except) {
 /* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
 const AT_KEY = 'heard.artistTotals', AT_TTL = 3 * 864e5;
 const artistTotals = (() => { try { return JSON.parse(localStorage.getItem(AT_KEY)) || {}; } catch (e) { return {}; } })();
-function setArtistTotal(name, id, albums) {
-  artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now() };
+function setArtistTotal(name, id, albums, img) {
+  const prev = artistTotals[norm(name)];
+  artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now(), img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
 }
 // 歌手列表與歌手頁共用：同一位歌手用同一個 Spotify id、同一套算法，數字才會一致
@@ -718,8 +730,7 @@ function statsFor(name, discKeys) {
   const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
   const all = new Set([...discKeys, ...local.map(albumKey)]);
   const heard = [...all].filter(k => isDone(statusOf(k))).length;
-  const want = [...all].filter(k => statusOf(k) === 'want').length;
-  return { heard, want, total: all.size, pct: all.size ? Math.round(heard / all.size * 100) : 0 };
+  return { heard, total: all.size, pct: all.size ? Math.round(heard / all.size * 100) : 0 };
 }
 function artistProgress(name) {
   const c = artistTotals[norm(name)]; if (!c) return null;
@@ -728,7 +739,7 @@ function artistProgress(name) {
 const atQueue = new Set(); let atRunning = 0, atRenderT = null;
 function queueArtistTotal(name, id) {
   const c = artistTotals[norm(name)];
-  if (!spOn() || atQueue.has(name) || (c && Date.now() - c.at < AT_TTL)) return;
+  if (!spOn() || atQueue.has(name) || (c && Date.now() - c.at < AT_TTL && c.img !== undefined)) return;
   atQueue.add(name); pumpArtistTotals(id);
 }
 async function pumpArtistTotals() {
@@ -740,8 +751,9 @@ async function pumpArtistTotals() {
         const rid = rowArtistId(name);
         const id = isSpId(rid) ? rid : await resolveArtistId(name);
         const albums = id ? await artistAlbums(id) : null;
+        const img = id ? await artistImage(id).catch(() => '') : '';
         // 如果這段時間使用者已經點進歌手頁更新過，就不要覆蓋
-        if (albums && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums);
+        if (albums && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
       } catch (e) {}
       atRunning--;
       clearTimeout(atRenderT);
@@ -756,9 +768,9 @@ function renderArtists(app) {
   // 規則：封存的專輯不會讓歌手出現在歌手列表（但歌手已在列表時，封存仍算進進度）
   Object.values(db.albums).filter(a => a.status !== 'archived').forEach(a => {
     const k = norm(a.artist);
-    if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [], want: [] });
+    if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [] });
     const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
-    g[a.status === 'want' ? 'want' : 'heard'].push(a);
+    g.heard.push(a);
   });
   const list = [...map.values()];
   list.forEach(x => { x.pg = artistProgress(x.name); });
@@ -771,15 +783,16 @@ function renderArtists(app) {
       <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
     </div>` : ''}
     ${list.length ? `<div class="list">${list.map(x => {
-      const c = (x.heard[0] || x.want[0]).cover;
+      const c = artistTotals[norm(x.name)]?.img || x.heard[0].cover;
       const pg = x.pg;
-      if (!pg || Date.now() - artistTotals[norm(x.name)].at > AT_TTL) queueArtistTotal(x.name);
+      const ce = artistTotals[norm(x.name)];
+      if (!pg || Date.now() - ce.at > AT_TTL || ce.img === undefined) queueArtistTotal(x.name);
       return `<div class="sw">
         <button class="sw-del" data-delartist="${esc(x.name)}">刪除</button>
         <button class="li sw-fg" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="av">${c ? `<img src="${esc(c)}" alt="">` : esc(x.name[0])}</div>
         <div class="grow"><div class="row-between"><div class="name">${esc(x.name)}</div>${pg ? `<b class="pct">${pg.pct}%</b>` : ''}</div>
-          <div class="muted small">${pg ? `聽過 ${pg.heard} / ${pg.total} 張` : `已聽 ${x.heard.length} 張${spOn() ? ' · 計算中…' : ''}`}${x.want.length ? ` · 想聽 ${x.want.length} 張` : ''}</div>
+          <div class="muted small">${pg ? `聽過 ${pg.heard} / ${pg.total} 張` : `已聽 ${x.heard.length} 張${spOn() ? ' · 計算中…' : ''}`}</div>
           ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
         <span class="muted">›</span></button></div>`;
     }).join('')}</div>`
@@ -802,6 +815,15 @@ async function renderArtist(app) {
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
+  if (v.img === undefined && spOn() && isSpId(v.id)) {
+    v.img = artistTotals[norm(v.name)]?.img || null;
+    artistImage(v.id).then(img => {
+      v.img = img || '';
+      if (img) { const c = artistTotals[norm(v.name)]; if (c) { c.img = img; try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {} } }
+      const av = state.view === v && $('.artist-hero .av');
+      if (av && img) av.innerHTML = `<img src="${esc(img)}" alt="">`;
+    }).catch(() => { v.img = ''; });
+  }
   const st = statsFor(v.name, v.albums.map(albumKey));
   const keys = new Set(v.albums.map(albumKey));
   const own = remember([...v.albums, ...local.filter(a => !keys.has(albumKey(a)))]);
@@ -811,15 +833,14 @@ async function renderArtist(app) {
   const counted = all;
   // 沒有篩選時直接用共用算法（跟歌手列表一致）；有篩選時算該分類
   const heard = v.filter ? counted.filter(a => isDone(statusOf(albumKey(a)))).length : st.heard;
-  const want = v.filter ? counted.filter(a => statusOf(albumKey(a)) === 'want').length : st.want;
   const totalN = v.filter ? counted.length : st.total;
   const pct = totalN ? Math.round(heard / totalN * 100) : 0;
-  const cover = all.find(a => a.cover)?.cover;
+  const cover = v.img || all.find(a => a.cover)?.cover;
   app.innerHTML = `${head}
     <div class="artist-hero">
       <div class="av">${cover ? `<img src="${esc(cover)}" alt="">` : ''}</div>
       <div style="flex:1;min-width:0"><h2>${esc(v.name)}</h2>
-        <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張${want ? ` · 想聽 ${want}` : ''}</span><b style="font-size:18px">${pct}%</b></div>
+        <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張</span><b style="font-size:18px">${pct}%</b></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
       </div>
     </div>
@@ -931,7 +952,6 @@ function renderSheet() {
     <div class="by"><button data-artist="${a.artistId || ''}" data-name="${esc(a.artist)}" style="color:inherit;font-weight:inherit">${esc(a.artist)} ›</button></div>
     <div class="meta" id="sheetMeta">${metaHTML(a, tracks)}</div>
     <div class="two">
-      <button class="big-btn ${st === 'want' ? 'want' : ''}" data-want="${esc(k)}">${st === 'want' ? I.markOn : I.mark} 想聽</button>
       <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${I.archive} 封存</button>
       <button class="big-btn ${st === 'heard' ? 'heard' : 'solid'}" data-heard="${esc(k)}">${I.check} 已聽過</button>
     </div>
@@ -1003,7 +1023,6 @@ function openManual() {
         <div style="flex:1"><label>類型</label><select name="type"><option value="Album">專輯</option><option value="EP">EP</option><option value="Single">單曲</option></select></div>
         <div style="flex:1"><label>年份</label><input name="year" inputmode="numeric" maxlength="4"></div>
       </div>
-      <div class="field"><label>加到</label><select name="status"><option value="heard">已聽過</option><option value="want">想聽</option></select></div>
       <div class="field"><label>封面圖片網址（選填）</label><input name="cover" type="url"></div>
       <div class="two"><button class="big-btn solid" type="submit">${I.plus} 加入</button></div>
     </form>`;
@@ -1014,7 +1033,7 @@ function openManual() {
     const a = { id: 'm' + Date.now(), title: f.title.trim(), artist: f.artist.trim(), artistId: '', type: f.type, year: f.year, cover: f.cover, tracks: 0, manual: true };
     const k = albumKey(a);
     if (db.albums[k]) return toast('這張已經在清單裡了');
-    seen.set(k, a); setStatus(k, f.status); closeSheet(true); toast('✓ 已加入');
+    seen.set(k, a); setStatus(k, 'heard'); closeSheet(true); toast('✓ 已加入');
   };
 }
 function exportData() {
@@ -1046,17 +1065,16 @@ document.addEventListener('click', async e => {
   // 從搜尋結果或最近搜尋點開的，記到最近搜尋
   if (state.tab === 'search' && !state.view && e.target.closest('#sres') && (state.results || e.target.closest('[data-rs]'))) {
     const op = e.target.closest('[data-open]'), ar = e.target.closest('[data-name]');
-    const onBtn = e.target.closest('[data-heard],[data-want],[data-arch]');
+    const onBtn = e.target.closest('[data-heard],[data-arch]');
     if (op && !onBtn) { const a = findAlbum(op.dataset.open); if (a) { const { _tracks, ...clean } = a; addRecentSearch({ type: 'album', key: op.dataset.open, album: clean }); } }
     else if (ar && !op) addRecentSearch({ type: 'artist', name: ar.dataset.name, artistId: ar.dataset.artist, img: ar.querySelector('img')?.getAttribute('src') || '' });
   }
   const del = e.target.closest('[data-delartist]');
   if (del) return deleteArtist(del.dataset.delartist);
-  const t = e.target.closest('[data-heard],[data-want],[data-arch],[data-open],[data-name],[data-tab],[data-f],[data-sort],[data-view],[data-act]');
+  const t = e.target.closest('[data-heard],[data-arch],[data-open],[data-name],[data-tab],[data-f],[data-sort],[data-view],[data-act]');
   if (!t) return;
   const d = t.dataset;
   if (d.heard !== undefined) { e.stopPropagation(); return toggle(d.heard, 'heard'); }
-  if (d.want !== undefined) { e.stopPropagation(); return toggle(d.want, 'want'); }
   if (d.arch !== undefined) { e.stopPropagation(); return toggle(d.arch, 'archived'); }
   if (d.open !== undefined) return openAlbum(d.open);
   if (d.name !== undefined) {
@@ -1169,7 +1187,7 @@ async function quickNowPlaying() {
 
 /* ================= 啟動 ================= */
 (async () => {
-  save();
+  purgeWant(); save();
   await spotifyCallback();
   const wantNp = new URLSearchParams(location.search).has('np');
   if (wantNp) history.replaceState(null, '', spRedirect());
