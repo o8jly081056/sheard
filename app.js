@@ -380,7 +380,7 @@ function albumCard(a, no) {
 function albumRow(a, no) {
   const k = albumKey(a), s = statusOf(k);
   return `<div class="arow${s === 'archived' ? ' is-arch' : ''}" data-open="${esc(k)}">
-    <span class="arow-no">${no}</span>
+    ${no ? `<span class="arow-no">${no}</span>` : ''}
     <div class="arow-cover">${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:20px">♪</div>'}</div>
     <div class="arow-main">
       <div class="arow-t">${esc(a.title)}</div>
@@ -589,21 +589,16 @@ function renderLib(app) {
   list.sort((a, b) => { const r = sdef.cmp(a, b, status) || timeOf(a, status) - timeOf(b, status); return so.desc ? -r : r; });
   remember(list);
   const isH = status === 'heard';
-  const view = viewOf(status);
   app.innerHTML = `
     <header class="top"><div><h1>${isH ? '已聽過' : '想聽'}</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${gearBtn()}</header>
     ${total ? `<div class="search">${I.search}<input id="lq" type="search" placeholder="在${isH ? '已聽過' : '想聽'}裡搜尋" value="${esc(state.libQ)}"></div>
     ${chipBar('lib', RELEASES, state.libFilter)}
     <div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label(status)}</span></button>
-      <div style="display:flex;gap:8px;align-items:center">
-        <div class="seg" role="group" aria-label="檢視方式">${VIEWS.map(([v, l]) => `<button class="${view === v ? 'on' : ''}" data-view="${v}" aria-label="${l}" title="${l}">${I['v_' + v]}</button>`).join('')}</div>
-        <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
-      </div>
+      <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
     </div>
     ${!list.length ? '<div class="empty">沒有符合的唱片</div>'
-      : view === 'list' ? `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`
-      : `<div class="grid ${view === 'small' ? 'small' : ''}">${list.map((a, i) => albumCard(a, list.length - i)).join('')}</div>`}`
+      : `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`}`
     : `<div class="empty"><b>${isH ? '還沒有已聽過的唱片' : '想聽清單是空的'}</b>到「首頁」找專輯，點 <span class="inline-ic">${isH ? I.check : I.mark}</span> ${isH ? '標記已聽過' : '加入想聽'}</div>`}
     ${isH && archiveCount() ? `<button class="archive-link" data-act="archive">${I.archive}已封存 ${archiveCount()} 張 ›</button>` : ''}`;
   const lq = $('#lq'); if (lq) lq.oninput = e => { state.libQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#lq'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -833,7 +828,7 @@ async function renderArtist(app) {
       const g = all.filter(a => inGroup(a, t));
       if (!g.length) return '';
       const h = g.filter(a => isDone(statusOf(albumKey(a)))).length;
-      return `<div class="section-h"><span>${l} · ${h}/${g.length}</span></div><div class="grid">${g.map(a => albumCard(a)).join('')}</div>`;
+      return `<div class="section-h"><span>${l} · ${h}/${g.length}</span></div><div class="alist">${g.map(a => albumRow(a)).join('')}</div>`;
     }).join('')}
     ${!all.length ? '<div class="empty">這個分類沒有作品</div>' : ''}`;
 }
