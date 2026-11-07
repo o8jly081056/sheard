@@ -953,7 +953,7 @@ function renderSheet() {
     <div class="meta" id="sheetMeta">${metaHTML(a, tracks)}</div>
     <div class="two">
       <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${I.archive} 封存</button>
-      <button class="big-btn ${st === 'heard' ? 'heard' : 'solid'}" data-heard="${esc(k)}">${I.check} 已聽過</button>
+      <button class="big-btn ${st === 'heard' ? 'heard' : 'solid'}" data-heard="${esc(k)}">${I.check} ${st === 'heard' ? '已聽過' : '標記已聽過'}</button>
     </div>
     <div class="tracks${tracks?.length ? ' in' : ''}" id="sheetTracks">${tracksHTML(tracks)}</div>
   </div>`;
