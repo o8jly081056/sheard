@@ -746,7 +746,6 @@ function showSheet() {
   const go = () => {
     if (tk !== sheetToken || s.classList.contains('show')) return;
     $('#scrim').classList.add('show'); s.classList.add('show');
-    document.documentElement.classList.add('sheet-open');
   };
   requestAnimationFrame(go); setTimeout(go, 40);   // 背景分頁不跑 rAF 時的保險
 }
@@ -755,7 +754,6 @@ function afterSheetOpen(fn) { setTimeout(fn, Math.max(0, 440 - (performance.now(
 function hideSheet() {
   sheetToken++;
   $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show');
-  document.documentElement.classList.remove('sheet-open');
   state.current = null;
 }
 // 關閉選單；rerender=true 時等收回動畫結束才重畫底下頁面，避免收回途中畫面閃動
@@ -778,19 +776,38 @@ async function loadTracks(k) {
       if (a.spotifyId) t = await albumTracks(a.spotifyId);
     }
     const s = seen.get(k); if (s) s._tracks = t; else seen.set(k, { ...a, _tracks: t });
-    if (state.current === k) afterSheetOpen(() => { if (state.current === k) renderSheet(); });
+    if (state.current === k) afterSheetOpen(() => applyTracks(k));
   } catch (e) {
-    const s = seen.get(k); if (s && !s._tracks) { s._tracks = []; if (state.current === k) renderSheet(); }
+    const s = seen.get(k); if (s && !s._tracks) { s._tracks = []; if (state.current === k) afterSheetOpen(() => applyTracks(k)); }
   }
 }
 async function openAlbum(k) {
   if (!findAlbum(k)) return;
   state.current = k; renderSheet();
-  // 封面先解碼完再滑入，避免滑到一半才解圖造成掉幀（最多等 150ms）
+  // 封面通常已在列表載入過，直接開；還沒載入才稍等解碼（最多 80ms），避免滑到一半才解圖
   const img = $('#sheet .detail-cover img');
-  if (img?.decode) await Promise.race([img.decode().catch(() => {}), sleep(150)]);
+  if (img && !img.complete && img.decode) await Promise.race([img.decode().catch(() => {}), sleep(80)]);
   if (state.current !== k) return;
   showSheet(); loadTracks(k);
+}
+function metaHTML(a, tracks) {
+  const totalMs = (tracks || []).reduce((t, x) => t + (x.ms || 0), 0);
+  const n = tracks?.length || a.tracks;
+  return `${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}${n ? ' · ' + n + ' 首' : ''}${totalMs ? ' · ' + fmtTotal(totalMs) : tracks === undefined && !a.manual ? ' · <span class="muted">計算時長…</span>' : ''}`;
+}
+function tracksHTML(tracks) {
+  const fmt = ms => ms ? `${Math.floor(ms / 60000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}` : '';
+  return (tracks || []).map(t => `<div><span>${t.n}</span><b style="flex:1;font-weight:400">${esc(t.name)}</b><em class="muted small" style="font-style:normal">${fmt(t.ms)}</em></div>`).join('');
+}
+// 曲目載入完成：只更新資訊列與曲目區，面板其他部分（封面、按鈕）不重建
+function applyTracks(k) {
+  if (state.current !== k) return;
+  const a = db.albums[k] || seen.get(k); if (!a) return;
+  const tracks = seen.get(k)?._tracks;
+  const m = $('#sheetMeta'); if (m) m.innerHTML = metaHTML(a, tracks);
+  const img = $('#sheet .detail-cover img'); if (img && a.cover && img.getAttribute('src') !== a.cover) img.src = a.cover;
+  const t = $('#sheetTracks');
+  if (t && tracks?.length && !t.childElementCount) { t.innerHTML = tracksHTML(tracks); void t.offsetHeight; t.classList.add('in'); }
 }
 function renderSheet() {
   const k = state.current; const saved = db.albums[k]; const a = saved || seen.get(k); if (!a) return;
@@ -804,14 +821,12 @@ function renderSheet() {
   const st = saved?.status || null;
   const tracks = seen.get(k)?._tracks;
   const spotify = a.spotifyId ? `https://open.spotify.com/album/${a.spotifyId}` : `https://open.spotify.com/search/${encodeURIComponent(a.artist + ' ' + a.title)}`;
-  const totalMs = (tracks || []).reduce((t, x) => t + (x.ms || 0), 0);
-  const fmt = ms => ms ? `${Math.floor(ms / 60000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}` : '';
   $('#sheet').innerHTML = `<div class="grab"></div><div class="detail">
     ${state.npKey === k && state.sp.np ? `<div style="text-align:center;margin:-4px 0 10px" class="small muted">${state.sp.np.playing ? '<span class="eq"><i></i><i></i><i></i></span>正在播放' : '⏸ 暫停中'}：${esc(state.sp.np.track)}</div>` : ''}
     <div class="detail-cover">${a.cover ? `<img src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:60px">♪</div>'}</div>
     <h2>${esc(a.title)}</h2>
     <div class="by"><button data-artist="${a.artistId || ''}" data-name="${esc(a.artist)}" style="color:inherit;font-weight:inherit">${esc(a.artist)} ›</button></div>
-    <div class="meta">${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}${(tracks?.length || a.tracks) ? ' · ' + (tracks?.length || a.tracks) + ' 首' : ''}${totalMs ? ' · ' + fmtTotal(totalMs) : tracks === undefined && !a.manual ? ' · <span class="muted">計算時長…</span>' : ''}</div>
+    <div class="meta" id="sheetMeta">${metaHTML(a, tracks)}</div>
     <div class="two">
       <button class="big-btn ${st === 'want' ? 'want' : ''}" data-want="${esc(k)}">${st === 'want' ? I.markOn : I.mark} 想聽</button>
       <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${I.archive} 封存</button>
@@ -823,7 +838,7 @@ function renderSheet() {
     <div class="btn-row">
       <a class="btn primary" href="${spotify}" target="_blank" rel="noopener">在 Spotify 開啟</a>
     </div>
-    ${tracks?.length ? `<div class="tracks">${tracks.map(t => `<div><span>${t.n}</span><b style="flex:1;font-weight:400">${esc(t.name)}</b><em class="muted small" style="font-style:normal">${fmt(t.ms)}</em></div>`).join('')}</div>` : ''}
+    <div class="tracks${tracks?.length ? ' in' : ''}" id="sheetTracks">${tracksHTML(tracks)}</div>
   </div>`;
   const note = $('#note'); if (note) note.onchange = e => { db.albums[k].note = e.target.value; touch(k); toast('已儲存筆記'); };
 }
@@ -982,6 +997,8 @@ document.addEventListener('click', async e => {
 // 每次切回 App：同步資料，並重新抓 Spotify 最近播放
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncNow(); if (spOn()) loadSpotifyHome(true); } });
 $('#scrim').onclick = () => closeSheet();
+// 面板打開時，在背景遮罩上滑動不會捲動底下的頁面
+$('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 (() => { // 下滑關閉：拖曳時 1:1 跟手，放開時依距離或速度決定收回或彈回
   const s = $('#sheet'), scrim = $('#scrim');
   let y0 = null, dy = 0, dragging = false, lastY = 0, lastT = 0, v = 0;

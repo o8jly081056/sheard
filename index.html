@@ -118,7 +118,7 @@ nav.tabs button.on .ic-off{display:none}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:30;opacity:0;pointer-events:none;transition:opacity .34s cubic-bezier(.32,.72,0,1)}
 .scrim.show{opacity:1;pointer-events:auto}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--bg2);border-radius:20px 20px 0 0;max-height:92vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;transform:translateY(105%);transition:transform .34s cubic-bezier(.32,.72,0,1);will-change:transform;backface-visibility:hidden;padding:10px 18px calc(24px + var(--safe-b));max-width:720px;margin:0 auto}
-html.sheet-open,html.sheet-open body{overflow:hidden;overscroll-behavior:none}
+
 /* 打開：快速出現、緩緩停下（類似原生 App）；收回：稍快 */
 .sheet.show{transition:transform .42s cubic-bezier(.16,1,.3,1)}
 .scrim.show{transition:opacity .3s ease-out}
@@ -147,7 +147,9 @@ html.sheet-open,html.sheet-open body{overflow:hidden;overscroll-behavior:none}
 .stars button.on{color:var(--star)}
 .field{margin-top:12px}
 .field label{display:block;font-size:12.5px;color:var(--fg2);margin-bottom:5px}
-.tracks{margin-top:14px;border-top:1px solid var(--line)}
+.tracks{margin-top:14px;border-top:1px solid var(--line);opacity:0;transition:opacity .25s ease}
+.tracks.in{opacity:1}
+.tracks:empty{border-top:0}
 .tracks div{display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px}
 .tracks span{color:var(--fg3);width:22px;text-align:right;flex:none}
 .toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:var(--fg);color:#111;padding:10px 18px;border-radius:999px;font-weight:600;opacity:0;transition:.2s;z-index:40;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
