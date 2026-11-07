@@ -495,8 +495,8 @@ function endSearch() {
   exitSearchMode();
 }
 /* 搜尋轉場（FLIP）：先用 transform 把搜尋列和內容滑上去、標題淡出，動畫結束才真正收起標題，
-   全程不改版面高度，所以不會掉幀。時間 0.35 秒、iOS 系統彈簧感曲線 cubic-bezier(.32,.72,0,1) */
-const SM_MS = 350, SM_EASE = 'cubic-bezier(.32,.72,0,1)';
+   全程不改版面高度，所以不會掉幀。時間 0.45 秒、iOS 系統彈簧感曲線 cubic-bezier(.32,.72,0,1) */
+const SM_MS = 450, SM_EASE = 'cubic-bezier(.32,.72,0,1)';
 let smT = null;
 function smEls() { return { app: $('#app'), head: $('.home-head'), row: $('.search-row'), res: $('#sres') }; }
 function smClear(...els) { els.forEach(e => { if (e) { e.style.transition = ''; e.style.transform = ''; e.style.opacity = ''; } }); }
