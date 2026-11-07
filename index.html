@@ -37,23 +37,23 @@ header.top .sub{color:var(--fg2);font-size:13px}
 .search input{padding-left:38px;height:44px;border-radius:12px}
 .search svg{position:absolute;left:12px;top:13px;opacity:.6}
 .li .av.sq{border-radius:6px}
-/* 搜尋轉場：只用 transform／opacity／顏色，不在動畫中重排整頁（時長 0.45 秒，iOS 彈簧感曲線） */
+/* 搜尋轉場：只用 transform／opacity／顏色，不在動畫中重排整頁（時長 0.55 秒，iOS 彈簧感曲線） */
 .home-head{will-change:transform,opacity}
 .app.search-mode .home-head{display:none}
 .search-row{display:flex;align-items:center;margin-bottom:8px;contain:layout style;will-change:transform}
 #sres{will-change:transform,opacity}
-#sform input{height:44px;border:0;border-radius:6px;background:#fff;color:#121212;font-weight:600;padding-left:46px;transition:background-color .45s cubic-bezier(.32,.72,0,1),color .45s cubic-bezier(.32,.72,0,1)}
+#sform input{height:44px;border:0;border-radius:6px;background:#fff;color:#121212;font-weight:600;padding-left:46px;transition:background-color .55s cubic-bezier(.32,.72,0,1),color .55s cubic-bezier(.32,.72,0,1)}
 .search-row.focus #sform input{background:#2a2a2a;color:#fff;font-weight:400}
 .search-row.focus #sform input::placeholder{color:#a7a7a7;font-weight:400}
 .search-row.focus #sform .s-ic{color:#fff}
-.search-cancel{max-width:0;overflow:hidden;white-space:nowrap;padding:8px 0;opacity:0;color:#fff;font-weight:400;font-size:16px;transition:max-width .45s cubic-bezier(.32,.72,0,1),opacity .3s cubic-bezier(.32,.72,0,1),padding .45s cubic-bezier(.32,.72,0,1)}
+.search-cancel{max-width:0;overflow:hidden;white-space:nowrap;padding:8px 0;opacity:0;color:#fff;font-weight:400;font-size:16px;transition:max-width .55s cubic-bezier(.32,.72,0,1),opacity .35s cubic-bezier(.32,.72,0,1),padding .55s cubic-bezier(.32,.72,0,1)}
 .search-row.focus .search-cancel{max-width:70px;opacity:1;padding:8px 2px 8px 14px}
 .app .search-cancel{color:#fff;font-weight:400}
 /* ===== 搜尋（比照 Spotify iOS） ===== */
 .search-row .search{flex:1;margin:0;min-width:0}
 #sform input::placeholder{color:#535353;font-weight:600}
 #sform input:focus{outline:none}
-#sform .s-ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#121212;opacity:1;transition:color .45s cubic-bezier(.32,.72,0,1)}
+#sform .s-ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#121212;opacity:1;transition:color .55s cubic-bezier(.32,.72,0,1)}
 #sform input::-webkit-search-cancel-button{-webkit-appearance:none}
 .s-title{font-size:18px;font-weight:700;color:#fff;margin:14px 0 6px}
 .slist{display:flex;flex-direction:column}
