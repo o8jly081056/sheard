@@ -564,17 +564,16 @@ async function deleteArtist(name) {
   delete artistTotals[norm(name)];
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
   save(); scheduleSync();
-  if (!Object.keys(db.albums).length) state.artistEdit = false;
   render(); toast(`已刪除「${name}」`);
 }
 function closeSwipes(except) {
-  document.querySelectorAll('.sw.open').forEach(el => { if (el !== except && !state.artistEdit) el.classList.remove('open'); });
+  document.querySelectorAll('.sw.open').forEach(el => { if (el !== except) el.classList.remove('open'); });
 }
 // 左滑顯示刪除（類似 iOS）
 (() => {
   let row = null, fg = null, x0 = 0, y0 = 0, dx = 0, mode = null, base = 0;
   document.addEventListener('touchstart', e => {
-    const f = e.target.closest('.sw-fg'); if (!f || state.artistEdit) { row = null; return; }
+    const f = e.target.closest('.sw-fg'); if (!f) { row = null; return; }
     fg = f; row = f.parentElement; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; mode = null;
     base = row.classList.contains('open') ? -88 : 0;
     closeSwipes(row);
@@ -660,17 +659,16 @@ function renderArtists(app) {
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
   app.innerHTML = `
-    <header class="top"><div><h1>歌手</h1>${list.length ? `<div class="sub">${list.length} 位歌手</div>` : ''}</div>
-      <div style="display:flex;gap:8px;align-items:center">${list.length ? `<button class="text-btn" data-act="artistEdit">${state.artistEdit ? '完成' : '編輯'}</button>` : ''}${gearBtn()}</div></header>
+    <header class="top"><div><h1>歌手</h1>${list.length ? `<div class="sub">${list.length} 位歌手</div>` : ''}</div>${gearBtn()}</header>
     ${list.length ? `<div class="row-between" style="margin-bottom:6px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
       <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
     </div>` : ''}
-    ${list.length ? `<div class="list${state.artistEdit ? ' editing' : ''}">${list.map(x => {
+    ${list.length ? `<div class="list">${list.map(x => {
       const c = (x.heard[0] || x.want[0]).cover;
       const pg = x.pg;
       if (!pg || Date.now() - artistTotals[norm(x.name)].at > AT_TTL) queueArtistTotal(x.name);
-      return `<div class="sw${state.artistEdit ? ' open' : ''}">
+      return `<div class="sw">
         <button class="sw-del" data-delartist="${esc(x.name)}">刪除</button>
         <button class="li sw-fg" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="av">${c ? `<img src="${esc(c)}" alt="">` : esc(x.name[0])}</div>
@@ -942,7 +940,7 @@ $('#importFile').onchange = async e => {
 /* ================= 事件 ================= */
 document.addEventListener('click', async e => {
   const swRow = e.target.closest('.sw');
-  if (swRow && !state.artistEdit && !e.target.closest('.sw-del') && (swRow.dataset.justSwiped || swRow.classList.contains('open'))) { swRow.classList.remove('open'); return; }
+  if (swRow && !e.target.closest('.sw-del') && (swRow.dataset.justSwiped || swRow.classList.contains('open'))) { swRow.classList.remove('open'); return; }
   if (!swRow) closeSwipes();
   const del = e.target.closest('[data-delartist]');
   if (del) return deleteArtist(del.dataset.delartist);
@@ -958,7 +956,7 @@ document.addEventListener('click', async e => {
     state.view = { type: 'artist', id: d.artist || '', name: d.name }; window.scrollTo(0, 0); return render();
   }
   if (d.tab) {
-    if (d.tab !== state.tab) { state.libFilter = null; state.libQ = ''; state.artistEdit = false; }
+    if (d.tab !== state.tab) { state.libFilter = null; state.libQ = ''; }
     else if (d.tab === 'search' && !state.view) { state.results = null; state.q = ''; }
     state.tab = d.tab; state.view = null; window.scrollTo(0, 0); return render();
   }
@@ -980,7 +978,6 @@ document.addEventListener('click', async e => {
     case 'back': state.view = null; return render();
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
-    case 'artistEdit': state.artistEdit = !state.artistEdit; return render();
     case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
     case 'sortMenu': return openSortMenu();
     case 'sortFlip': { const c = sortOf(state.tab); db.settings.sort[state.tab] = { key: c.key, desc: !c.desc }; save(); return render(); }
