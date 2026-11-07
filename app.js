@@ -648,11 +648,12 @@ async function pumpArtistTotals() {
 
 function renderArtists(app) {
   const map = new Map();
-  Object.values(db.albums).forEach(a => {
+  // 規則：封存的專輯不會讓歌手出現在歌手列表（但歌手已在列表時，封存仍算進進度）
+  Object.values(db.albums).filter(a => a.status !== 'archived').forEach(a => {
     const k = norm(a.artist);
     if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [], want: [] });
     const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
-    g[a.status === 'want' ? 'want' : 'heard'].push(a);   // 封存算在已聽過
+    g[a.status === 'want' ? 'want' : 'heard'].push(a);
   });
   const list = [...map.values()];
   list.forEach(x => { x.pg = artistProgress(x.name); });
