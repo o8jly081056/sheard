@@ -127,10 +127,15 @@ async function spCached(path) {
 const isSpId = id => /^[0-9A-Za-z]{22}$/.test(id || '');
 const dedupe = list => { const m = new Map(); list.forEach(a => { const k = albumKey(a); if (!m.has(k)) m.set(k, a); }); return [...m.values()]; };
 // 開發模式每次最多 10 筆，一次抓 3 頁（30 筆）
-async function searchAlbums(q) {
+// Spotify 搜尋：先帶 market，失敗就不帶再試一次（開發模式有時會拒絕某些參數）
+async function spSearch(type, q, offset = 0) {
   const enc = encodeURIComponent(q);
-  const pages = await Promise.all([0, 10, 20].map(o => spCached(`/search?type=album&limit=10&offset=${o}&market=from_token&q=${enc}`).catch(() => null)));
-  if (pages.every(p => !p)) throw new Error('搜尋失敗');
+  try { return await spCached(`/search?type=${type}&limit=10&offset=${offset}&market=from_token&q=${enc}`); }
+  catch (e) { if (offset) throw e; return await spCached(`/search?type=${type}&limit=10&q=${enc}`); }
+}
+async function searchAlbums(q) {
+  const pages = await Promise.all([0, 10, 20].map(o => spSearch('album', q, o).catch(e => ({ err: e }))));
+  if (pages.every(p => !p || p.err)) throw pages[0]?.err || new Error('搜尋失敗');
   return dedupe(pages.flatMap(p => p?.albums?.items || []).filter(Boolean).map(fromSpotify));
 }
 async function searchArtists(q) {
@@ -147,22 +152,29 @@ async function artistImage(id) {
   const im = j?.images || [];
   return (im.find(x => (x.width || 0) >= 200 && (x.width || 0) <= 400) || im[0] || {}).url || '';
 }
+// 歌手：照 Spotify 的相關度，名稱完全相同的排最前（不再用名稱過濾，中文搜尋英文名的歌手也找得到）
 async function searchArtistsTop(q) {
-  const j = await spCached(`/search?type=artist&limit=10&q=${encodeURIComponent(q)}`);
+  const j = await spSearch('artist', q);
   const list = (j?.artists?.items || []).filter(Boolean);
   const nq = norm(q);
-  return list.filter(x => norm(x.name).includes(nq) || nq.includes(norm(x.name))).sort((a, b) => (norm(b.name) === nq) - (norm(a.name) === nq));
+  return list.sort((a, b) => (norm(b.name) === nq) - (norm(a.name) === nq)).slice(0, 5);
 }
 async function artistAlbums(id, groups = 'album,single,compilation') {
-  let lim = 50, out = [];
-  for (let off = 0; off < 300; off += lim) {
-    let j;
-    try { j = await spCached(`/artists/${id}/albums?include_groups=${groups}&market=from_token&limit=${lim}&offset=${off}`); }
-    catch (e) { if (lim === 50 && off === 0 && /400/.test(e.message)) { lim = 10; off = -lim; continue; } throw e; }
-    out.push(...(j?.items || []).filter(Boolean));
-    if (!j?.next) break;
+  // 依序嘗試：每頁 50 筆＋market → 每頁 10 筆＋market → 每頁 10 筆不帶 market（因應開發模式限制）
+  const tries = [[50, '&market=from_token'], [10, '&market=from_token'], [10, '']];
+  let lastErr;
+  for (const [lim, mk] of tries) {
+    try {
+      const out = [];
+      for (let off = 0; off < 300; off += lim) {
+        const j = await spCached(`/artists/${id}/albums?include_groups=${groups}${mk}&limit=${lim}&offset=${off}`);
+        out.push(...(j?.items || []).filter(Boolean));
+        if (!j?.next) break;
+      }
+      return dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
+    } catch (e) { lastErr = e; if (/拒絕存取|過期|頻繁/.test(e.message)) throw e; }
   }
-  return dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
+  throw lastErr;
 }
 async function resolveArtistId(name) {
   const j = await spCached(`/search?type=artist&limit=10&q=${encodeURIComponent(name)}`);
@@ -416,13 +428,25 @@ function searchBodyHTML() {
   if (state.searchFocus && !r && !state.q) return recentSearchHTML();
   if (!r) return state.loading ? '<div class="spinner"></div>' : homeHTML();
   const artists = r.artists || [], albums = remember(r.albums || []);
-  if (!artists.length && !albums.length) return state.loading ? '<div class="spinner"></div>' : '<div class="empty">找不到結果</div>';
+  if (!artists.length && !albums.length) return state.loading ? '<div class="spinner"></div>'
+    : r.err ? `<div class="empty">搜尋失敗<br><span class="small">${esc(r.err)}</span></div>` : '<div class="empty">找不到結果</div>';
   const img = x => x.images?.[x.images.length - 1]?.url || x.images?.[0]?.url || '';
-  // 跟 Spotify 一樣：最相關的歌手在最上面，接著是專輯
+  const row = a => sRowAlbum(a, albumKey(a)) + albumActs(albumKey(a)) + '</div>';
+  const disc = remember(r.disc || []);
+  const discKeys = new Set(disc.map(albumKey));
+  const top = artists[0];
+  // 跟 Spotify 一樣：最相關的歌手在最上面；接著列出他的全部作品，再來是其他符合的專輯與歌手
+  const discHTML = !top ? '' : r.discLoading ? '<div class="spinner sm"></div>'
+    : disc.length ? RELEASES.map(([g, l]) => {
+        const list = disc.filter(a => inGroup(a, g));
+        return list.length ? `<div class="s-sub">${l}</div>${list.map(row).join('')}` : '';
+      }).join('') : '';
+  const others = albums.filter(a => !discKeys.has(albumKey(a)));
   return `<div class="slist" style="margin-top:6px">
-    ${artists.slice(0, 1).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}
-    ${albums.map(a => sRowAlbum(a, albumKey(a)) + albumActs(albumKey(a)) + '</div>').join('')}
-    ${artists.slice(1, 4).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}
+    ${top ? sRowArtist(top.name, top.id, img(top)) + '</div>' : ''}
+    ${discHTML}
+    ${others.length ? `${disc.length ? '<div class="s-sub">其他專輯</div>' : ''}${others.map(row).join('')}` : ''}
+    ${artists.slice(1, 4).length ? `<div class="s-sub">其他歌手</div>${artists.slice(1, 4).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}` : ''}
   </div>`;
 }
 /* ---------- 最近搜尋（像 Spotify：記錄從搜尋結果點開的專輯／歌手，存在這台裝置） ---------- */
@@ -584,9 +608,18 @@ async function doSearch(q) {
   const [al, ar] = await Promise.allSettled([searchAlbums(q), searchArtistsTop(q)]);
   if (seq !== searchSeq) return;               // 已經有更新的搜尋，丟掉舊結果
   state.loading = false;
-  state.results = { albums: al.status === 'fulfilled' ? al.value : [], artists: ar.status === 'fulfilled' ? ar.value : [] };
-  if (al.status === 'rejected' && ar.status === 'rejected') toast(al.reason?.message || '連線失敗，請稍後再試');
+  const artists = ar.status === 'fulfilled' ? ar.value : [];
+  state.results = { albums: al.status === 'fulfilled' ? al.value : [], artists,
+    err: al.status === 'rejected' && ar.status === 'rejected' ? (al.reason?.message || '連線失敗') : '' };
   updateSearchBody();
+  // 搜到歌手時，把他的專輯、單曲和迷你專輯、合輯全部列出來
+  const top = artists[0];
+  if (top?.id) {
+    state.results.discFor = top.id; state.results.discLoading = true; updateSearchBody();
+    try { const disc = await artistAlbums(top.id); if (seq === searchSeq) state.results.disc = disc; }
+    catch (e) { if (seq === searchSeq) state.results.discErr = e.message; }
+    if (seq === searchSeq) { state.results.discLoading = false; updateSearchBody(); }
+  }
 }
 
 /* ---------- 已聽過 ---------- */
