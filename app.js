@@ -388,6 +388,7 @@ function viewOf(st) { db.settings.view ??= {}; return db.settings.view[st] || 'g
 // 搜尋結果區塊（只更新這塊，打字時輸入框不會被重畫、鍵盤也不會收起）
 function searchBodyHTML() {
   const r = state.results;
+  if (state.searchFocus && !r && !state.q) return recentSearchHTML();
   if (!r) return state.loading ? '<div class="spinner"></div>' : homeHTML();
   const artists = r.artists || [], albums = remember(r.albums || []);
   if (!artists.length && !albums.length) return state.loading ? '<div class="spinner"></div>' : '<div class="empty">找不到結果</div>';
@@ -402,6 +403,33 @@ function searchBodyHTML() {
   return `${artists.length ? `<div class="section-h"><span>歌手</span></div><div class="list">${artistHTML}</div>` : ''}
     ${albums.length ? `<div class="section-h"><span>專輯</span></div><div class="grid">${albums.map(a => albumCard(a)).join('')}</div>` : ''}`;
 }
+/* ---------- 最近搜尋（像 Spotify：記錄從搜尋結果點開的專輯／歌手，存在這台裝置） ---------- */
+const RS_KEY = 'heard.recentSearches', RS_MAX = 20;
+let recentSearches = (() => { try { return JSON.parse(localStorage.getItem(RS_KEY)) || []; } catch (e) { return []; } })();
+function saveRecentSearches() { try { localStorage.setItem(RS_KEY, JSON.stringify(recentSearches)); } catch (e) {} }
+function addRecentSearch(item) {
+  const id = item.type + ':' + (item.type === 'album' ? item.key : norm(item.name));
+  recentSearches = [{ ...item, id }, ...recentSearches.filter(x => x.id !== id)].slice(0, RS_MAX);
+  saveRecentSearches();
+}
+function recentSearchHTML() {
+  if (!recentSearches.length) return '<div class="empty small">還沒有最近搜尋</div>';
+  return `<div class="section-h"><span>最近搜尋</span></div><div class="list">${recentSearches.map((x, i) => {
+    if (x.type === 'album') {
+      remember([x.album]);
+      return `<div class="li rs-row" data-open="${esc(x.key)}" data-rs="1">
+        <div class="av sq">${x.album.cover ? `<img loading="lazy" src="${esc(x.album.cover)}" alt="">` : '♪'}</div>
+        <div class="grow"><div class="name">${esc(x.album.title)}</div><div class="muted small">${typeLabel(x.album.type)} · ${esc(x.album.artist)}</div></div>
+        <button class="rs-x" data-rmrecent="${i}" aria-label="移除">✕</button></div>`;
+    }
+    return `<div class="li rs-row" data-artist="${esc(x.artistId || '')}" data-name="${esc(x.name)}" data-rs="1">
+      <div class="av">${x.img ? `<img loading="lazy" src="${esc(x.img)}" alt="">` : esc(x.name[0])}</div>
+      <div class="grow"><div class="name">${esc(x.name)}</div><div class="muted small">歌手</div></div>
+      <button class="rs-x" data-rmrecent="${i}" aria-label="移除">✕</button></div>`;
+  }).join('')}</div>
+  <div style="text-align:center;margin-top:18px"><button class="btn sm" data-act="clearRecent">清除最近搜尋</button></div>`;
+}
+
 function updateSearchBody() {
   const el = $('#sres');
   if (el && state.tab === 'search' && !state.view) el.innerHTML = searchBodyHTML(); else render();
@@ -410,7 +438,10 @@ let searchT = null, searchSeq = 0;
 function renderSearch(app) {
   app.innerHTML = `
     <header class="top"><h1>首頁</h1>${gearBtn()}</header>
-    <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="你想收聽什麼？" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
+    <div class="search-row${state.searchFocus ? ' focus' : ''}">
+      <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="你想收聽什麼？" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
+      <button class="text-btn search-cancel" data-act="searchCancel">取消</button>
+    </div>
     <div id="sres">${searchBodyHTML()}</div>`;
   $('#sform').onsubmit = e => { e.preventDefault(); $('#q').blur(); clearTimeout(searchT); doSearch($('#q').value.trim()); };
   // 跟 Spotify 一樣邊打邊搜尋
@@ -420,7 +451,21 @@ function renderSearch(app) {
     if (!q) { searchSeq++; state.results = null; state.q = ''; state.loading = false; updateSearchBody(); return; }
     searchT = setTimeout(() => doSearch(q), 350);
   });
+  const onFocus = () => {
+    if (state.searchFocus) return;
+    state.searchFocus = true; $('.search-row').classList.add('focus');
+    if (!state.q) updateSearchBody();
+  };
+  $('#q').addEventListener('focus', onFocus);
+  $('#q').addEventListener('pointerdown', onFocus);
   if (!state.results && !state.loading && spOn()) loadSpotifyHome();
+}
+function endSearch() {
+  clearTimeout(searchT); searchSeq++;
+  state.searchFocus = false; state.results = null; state.q = ''; state.loading = false;
+  const q = $('#q'); if (q) { q.value = ''; q.blur(); }
+  $('.search-row')?.classList.remove('focus');
+  updateSearchBody();
 }
 
 function homeHTML() {
@@ -932,6 +977,15 @@ document.addEventListener('click', async e => {
   const swRow = e.target.closest('.sw');
   if (swRow && !e.target.closest('.sw-del') && (swRow.dataset.justSwiped || swRow.classList.contains('open'))) { swRow.classList.remove('open'); return; }
   if (!swRow) closeSwipes();
+  const rm = e.target.closest('[data-rmrecent]');
+  if (rm) { e.stopPropagation(); recentSearches.splice(+rm.dataset.rmrecent, 1); saveRecentSearches(); return updateSearchBody(); }
+  // 從搜尋結果或最近搜尋點開的，記到最近搜尋
+  if (state.tab === 'search' && !state.view && e.target.closest('#sres') && (state.results || e.target.closest('[data-rs]'))) {
+    const op = e.target.closest('[data-open]'), ar = e.target.closest('[data-name]');
+    const onBtn = e.target.closest('[data-heard],[data-want],[data-arch]');
+    if (op && !onBtn) { const a = findAlbum(op.dataset.open); if (a) { const { _tracks, ...clean } = a; addRecentSearch({ type: 'album', key: op.dataset.open, album: clean }); } }
+    else if (ar && !op) addRecentSearch({ type: 'artist', name: ar.dataset.name, artistId: ar.dataset.artist, img: ar.querySelector('img')?.getAttribute('src') || '' });
+  }
   const del = e.target.closest('[data-delartist]');
   if (del) return deleteArtist(del.dataset.delartist);
   const t = e.target.closest('[data-heard],[data-want],[data-arch],[data-open],[data-name],[data-tab],[data-f],[data-sort],[data-view],[data-act]');
@@ -946,7 +1000,7 @@ document.addEventListener('click', async e => {
     state.view = { type: 'artist', id: d.artist || '', name: d.name }; window.scrollTo(0, 0); return render();
   }
   if (d.tab) {
-    if (d.tab !== state.tab) { state.libFilter = null; state.libQ = ''; }
+    if (d.tab !== state.tab) { state.libFilter = null; state.libQ = ''; state.searchFocus = false; }
     else if (d.tab === 'search' && !state.view) { state.results = null; state.q = ''; }
     state.tab = d.tab; state.view = null; window.scrollTo(0, 0); return render();
   }
@@ -967,6 +1021,8 @@ document.addEventListener('click', async e => {
     case 'back': state.view = null; return render();
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
+    case 'searchCancel': return endSearch();
+    case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
     case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
     case 'sortMenu': return openSortMenu();
     case 'sortFlip': { const c = sortOf(state.tab); db.settings.sort[state.tab] = { key: c.key, desc: !c.desc }; save(); return render(); }
