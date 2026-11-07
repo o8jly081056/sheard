@@ -1079,6 +1079,7 @@ function openMenu() {
         ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>`;
   const spBlock = !CFG.SPOTIFY_CLIENT_ID ? '<div class="muted small">尚未設定 Spotify（見 SETUP.md）</div>'
     : spOn() ? `<div class="panel row-between"><span>✓ 已連結 Spotify</span><button class="btn sm" data-act="spLogout">中斷連結</button></div>
+      <button class="btn sm" style="margin-top:10px" data-act="copyDiag">複製診斷資料</button>
       <details class="diag"><summary>連線診斷（最近 ${spLog.length} 次請求）</summary>${spLog.map(x => `<div class="diag-row ${x.ok ? '' : 'bad'}">
         <span>${new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false })}</span><code>${esc(decodeURIComponent(x.path).slice(0, 90))}</code><b>${esc(x.info)}</b></div>`).join('') || '<div class="muted small">還沒有紀錄</div>'}</details>`
     : `<button class="btn primary" data-act="spLogin">連結 Spotify</button>`;
@@ -1206,6 +1207,14 @@ document.addEventListener('click', async e => {
     case 'back': state.view = null; return render();
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
+    case 'copyDiag': {
+      const txt = JSON.stringify({ v: 'diag1', now: new Date().toISOString(), cooldownLeft: cooldownLeft(), strikes: spStrikes,
+        tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES,
+        log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
+      try { await navigator.clipboard.writeText(txt); toast('已複製，貼給 Claude 就好'); }
+      catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
+      return;
+    }
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
