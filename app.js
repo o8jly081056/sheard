@@ -160,21 +160,24 @@ async function searchArtistsTop(q) {
   return list.sort((a, b) => (norm(b.name) === nq) - (norm(a.name) === nq)).slice(0, 5);
 }
 async function artistAlbums(id, groups = 'album,single,compilation') {
-  // 依序嘗試：每頁 50 筆＋market → 每頁 10 筆＋market → 每頁 10 筆不帶 market（因應開發模式限制）
-  const tries = [[50, '&market=from_token'], [10, '&market=from_token'], [10, '']];
-  let lastErr;
-  for (const [lim, mk] of tries) {
+  // Spotify 文件：此端點 limit 最大 10（2026 起），超過可能回傳空結果；用 10 筆一頁翻頁抓完
+  // 先帶 market，若出錯或是空的，再不帶 market 試一次
+  const tries = ['&market=from_token', ''];
+  let lastErr = null, result = [];
+  for (const mk of tries) {
     try {
       const out = [];
-      for (let off = 0; off < 300; off += lim) {
-        const j = await spCached(`/artists/${id}/albums?include_groups=${groups}${mk}&limit=${lim}&offset=${off}`);
+      for (let off = 0; off < 300; off += 10) {
+        const j = await spCached(`/artists/${id}/albums?include_groups=${groups}${mk}&limit=10&offset=${off}`);
         out.push(...(j?.items || []).filter(Boolean));
-        if (!j?.next) break;
+        if (!j?.next || !(j?.items || []).length) break;
       }
-      return dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
+      result = dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
+      if (result.length) return result;
     } catch (e) { lastErr = e; if (/拒絕存取|過期|頻繁/.test(e.message)) throw e; }
   }
-  throw lastErr;
+  if (!result.length && lastErr) throw lastErr;
+  return result;
 }
 async function resolveArtistId(name) {
   const j = await spCached(`/search?type=artist&limit=10&q=${encodeURIComponent(name)}`);
@@ -769,7 +772,7 @@ function closeSwipes(except) {
 })();
 /* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
 const AT_KEY = 'heard.artistTotals', AT_TTL = 3 * 864e5;
-const artistTotals = (() => { try { return JSON.parse(localStorage.getItem(AT_KEY)) || {}; } catch (e) { return {}; } })();
+const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
   artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now(), img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
@@ -808,7 +811,7 @@ async function pumpArtistTotals() {
         const albums = id ? await artistAlbums(id) : null;
         const img = id ? await artistImage(id).catch(() => '') : '';
         // 如果這段時間使用者已經點進歌手頁更新過，就不要覆蓋
-        if (albums && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
+        if (albums?.length && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
       } catch (e) {}
       atRunning--;
       clearTimeout(atRenderT);
@@ -866,7 +869,7 @@ async function renderArtist(app) {
         if (!isSpId(v.id)) v.id = await resolveArtistId(v.name);
         v.albums = v.id ? await artistAlbums(v.id) : [];
       }
-    } catch (e) { v.albums = []; toast(e.message || '載入失敗'); }
+    } catch (e) { v.albums = []; v.err = e.message || '載入失敗'; }
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
@@ -906,7 +909,8 @@ async function renderArtist(app) {
       const h = g.filter(a => isDone(statusOf(albumKey(a)))).length;
       return `<div class="section-h"><span>${l} · ${h}/${g.length}</span></div><div class="alist">${g.map(a => albumRow(a)).join('')}</div>`;
     }).join('')}
-    ${!all.length ? '<div class="empty">這個分類沒有作品</div>' : ''}`;
+    ${!all.length ? (v.err ? `<div class="empty">載入失敗<br><span class="small">${esc(v.err)}</span><br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>`
+      : v.filter ? '<div class="empty">這個分類沒有作品</div>' : `<div class="empty">Spotify 沒有回傳作品<br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>`) : ''}`;
 }
 
 /* ================= 專輯詳情 ================= */
@@ -1160,6 +1164,7 @@ document.addEventListener('click', async e => {
     case 'back': state.view = null; return render();
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
+    case 'artistRetry': if (state.view) { cache.clear(); delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
     case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
