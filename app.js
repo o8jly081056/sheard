@@ -361,7 +361,7 @@ function render() {
 
 function albumCard(a, no) {
   const k = albumKey(a), s = statusOf(k);
-  return `<div class="card" data-open="${esc(k)}">
+  return `<div class="card${s === 'archived' ? ' is-arch' : ''}" data-open="${esc(k)}">
     <div class="cover">
       ${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph">♪</div>'}
       ${a.type !== 'Album' ? `<span class="badge">${typeLabel(a.type)}</span>` : ''}
@@ -379,7 +379,7 @@ function albumCard(a, no) {
 /* 列表式的一列 */
 function albumRow(a, no) {
   const k = albumKey(a), s = statusOf(k);
-  return `<div class="arow" data-open="${esc(k)}">
+  return `<div class="arow${s === 'archived' ? ' is-arch' : ''}" data-open="${esc(k)}">
     <span class="arow-no">${no}</span>
     <div class="arow-cover">${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:20px">♪</div>'}</div>
     <div class="arow-main">
@@ -435,7 +435,7 @@ function addRecentSearch(item) {
 const xIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 function sRowAlbum(a, k, extra = '') {
   const s = statusOf(k);
-  return `<div class="srow" data-open="${esc(k)}"${extra}>
+  return `<div class="srow${s === 'archived' ? ' is-arch' : ''}" data-open="${esc(k)}"${extra}>
     <div class="srow-img">${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:22px">♪</div>'}</div>
     <div class="srow-txt"><div class="srow-t">${esc(a.title)}</div><div class="srow-s">${s === 'heard' ? '<span class="lbl heard">已聽過</span> • ' : s === 'want' ? '<span class="lbl want">想聽</span> • ' : s === 'archived' ? '<span class="lbl arch">已封存</span> • ' : ''}${typeLabel(a.type)} • ${esc(a.artist)}</div></div>`;
 }
@@ -931,7 +931,7 @@ function renderSheet() {
   const tracks = seen.get(k)?._tracks;
   $('#sheet').innerHTML = `<div class="grab"></div><div class="detail">
     ${state.npKey === k && state.sp.np ? `<div style="text-align:center;margin:-4px 0 10px" class="small muted">${state.sp.np.playing ? '<span class="eq"><i></i><i></i><i></i></span>正在播放' : '⏸ 暫停中'}：${esc(state.sp.np.track)}</div>` : ''}
-    <div class="detail-cover">${a.cover ? `<img src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:60px">♪</div>'}</div>
+    <div class="detail-cover${st === 'archived' ? ' is-arch' : ''}">${a.cover ? `<img src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:60px">♪</div>'}</div>
     <h2>${esc(a.title)}</h2>
     <div class="by"><button data-artist="${a.artistId || ''}" data-name="${esc(a.artist)}" style="color:inherit;font-weight:inherit">${esc(a.artist)} ›</button></div>
     <div class="meta" id="sheetMeta">${metaHTML(a, tracks)}</div>
