@@ -412,7 +412,7 @@ let searchT = null, searchSeq = 0;
 function renderSearch(app) {
   app.innerHTML = `
     <header class="top"><h1>首頁</h1>${gearBtn()}</header>
-    <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="歌手、專輯" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
+    <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="你想收聽什麼？" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
     <div id="sres">${searchBodyHTML()}</div>`;
   $('#sform').onsubmit = e => { e.preventDefault(); $('#q').blur(); clearTimeout(searchT); doSearch($('#q').value.trim()); };
   // 跟 Spotify 一樣邊打邊搜尋
