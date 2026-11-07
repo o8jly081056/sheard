@@ -351,6 +351,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 
 /* ================= 畫面 ================= */
 function render() {
+  $('#app').classList.toggle('search-mode', state.tab === 'search' && !state.view && !!state.searchFocus);
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === state.tab && !state.view));
   const app = $('#app');
   if (state.view?.type === 'artist') return renderArtist(app);
@@ -404,16 +405,13 @@ function searchBodyHTML() {
   if (!r) return state.loading ? '<div class="spinner"></div>' : homeHTML();
   const artists = r.artists || [], albums = remember(r.albums || []);
   if (!artists.length && !albums.length) return state.loading ? '<div class="spinner"></div>' : '<div class="empty">找不到結果</div>';
-  const artistHTML = artists.slice(0, 3).map(x => {
-    const n = Object.values(db.albums).filter(a => isDone(a.status) && norm(a.artist) === norm(x.name)).length;
-    const img = x.images?.[x.images.length - 1]?.url || x.images?.[0]?.url;
-    return `<button class="li" data-artist="${esc(x.id)}" data-name="${esc(x.name)}">
-      <div class="av">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : esc(x.name[0])}</div>
-      <div class="grow"><div class="name">${esc(x.name)}</div><div class="muted small">歌手${n ? ` · 已聽 ${n} 張` : ''}</div></div>
-      <span class="muted">›</span></button>`;
-  }).join('');
-  return `${artists.length ? `<div class="section-h"><span>歌手</span></div><div class="list">${artistHTML}</div>` : ''}
-    ${albums.length ? `<div class="section-h"><span>專輯</span></div><div class="grid">${albums.map(a => albumCard(a)).join('')}</div>` : ''}`;
+  const img = x => x.images?.[x.images.length - 1]?.url || x.images?.[0]?.url || '';
+  // 跟 Spotify 一樣：最相關的歌手在最上面，接著是專輯
+  return `<div class="slist" style="margin-top:6px">
+    ${artists.slice(0, 1).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}
+    ${albums.map(a => sRowAlbum(a, albumKey(a)) + albumActs(albumKey(a)) + '</div>').join('')}
+    ${artists.slice(1, 4).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}
+  </div>`;
 }
 /* ---------- 最近搜尋（像 Spotify：記錄從搜尋結果點開的專輯／歌手，存在這台裝置） ---------- */
 // 跨裝置同步：存在雲端 albums 表的一列特殊資料（key = META_RS），不會被當成專輯
@@ -434,22 +432,30 @@ function addRecentSearch(item) {
   recentSearches = [{ ...item, id }, ...recentSearches.filter(x => x.id !== id)].slice(0, RS_MAX);
   saveRecentSearches();
 }
+const xIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+function sRowAlbum(a, k, extra = '') {
+  const s = statusOf(k);
+  return `<div class="srow" data-open="${esc(k)}"${extra}>
+    <div class="srow-img">${a.cover ? `<img loading="lazy" src="${esc(a.cover)}" alt="">` : '<div class="ph" style="font-size:22px">♪</div>'}</div>
+    <div class="srow-txt"><div class="srow-t">${esc(a.title)}</div><div class="srow-s">${s === 'heard' ? '<span class="lbl heard">已聽過</span> • ' : s === 'want' ? '<span class="lbl want">想聽</span> • ' : s === 'archived' ? '<span class="lbl arch">已封存</span> • ' : ''}${typeLabel(a.type)} • ${esc(a.artist)}</div></div>`;
+}
+function sRowArtist(name, id, img, extra = '') {
+  return `<div class="srow" data-artist="${esc(id || '')}" data-name="${esc(name)}"${extra}>
+    <div class="srow-img round">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : `<span>${esc(name[0])}</span>`}</div>
+    <div class="srow-txt"><div class="srow-t">${esc(name)}</div><div class="srow-s">歌手</div></div>`;
+}
+const albumActs = k => { const s = statusOf(k); return `<div class="srow-acts">
+  ${!isDone(s) ? `<button class="mini ${s === 'want' ? 'want' : ''}" data-want="${esc(k)}" aria-label="想聽">${s === 'want' ? I.markOn : I.mark}</button>` : ''}
+  ${s !== 'heard' ? `<button class="mini ${s === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}" aria-label="封存">${I.archive}</button>` : ''}
+  <button class="mini ${s === 'heard' ? 'heard' : ''}" data-heard="${esc(k)}" aria-label="已聽過">${I.check}</button></div>`; };
 function recentSearchHTML() {
-  if (!recentSearches.length) return '<div class="empty small">還沒有最近搜尋</div>';
-  return `<div class="section-h"><span>最近搜尋</span></div><div class="list">${recentSearches.map((x, i) => {
-    if (x.type === 'album') {
-      remember([x.album]);
-      return `<div class="li rs-row" data-open="${esc(x.key)}" data-rs="1">
-        <div class="av sq">${x.album.cover ? `<img loading="lazy" src="${esc(x.album.cover)}" alt="">` : '♪'}</div>
-        <div class="grow"><div class="name">${esc(x.album.title)}</div><div class="muted small">${typeLabel(x.album.type)} · ${esc(x.album.artist)}</div></div>
-        <button class="rs-x" data-rmrecent="${i}" aria-label="移除">✕</button></div>`;
-    }
-    return `<div class="li rs-row" data-artist="${esc(x.artistId || '')}" data-name="${esc(x.name)}" data-rs="1">
-      <div class="av">${x.img ? `<img loading="lazy" src="${esc(x.img)}" alt="">` : esc(x.name[0])}</div>
-      <div class="grow"><div class="name">${esc(x.name)}</div><div class="muted small">歌手</div></div>
-      <button class="rs-x" data-rmrecent="${i}" aria-label="移除">✕</button></div>`;
+  if (!recentSearches.length) return '';
+  return `<div class="s-title">最近搜尋</div><div class="slist">${recentSearches.map((x, i) => {
+    const xb = `<button class="srow-x" data-rmrecent="${i}" aria-label="移除">${xIcon}</button></div>`;
+    if (x.type === 'album') { remember([x.album]); return sRowAlbum(x.album, x.key, ' data-rs="1"') + xb; }
+    return sRowArtist(x.name, x.artistId, x.img, ' data-rs="1"') + xb;
   }).join('')}</div>
-  <div style="text-align:center;margin-top:18px"><button class="btn sm" data-act="clearRecent">清除最近搜尋</button></div>`;
+  <div style="text-align:center"><button class="s-clear" data-act="clearRecent">清除最近搜尋</button></div>`;
 }
 
 function updateSearchBody() {
@@ -459,9 +465,9 @@ function updateSearchBody() {
 let searchT = null, searchSeq = 0;
 function renderSearch(app) {
   app.innerHTML = `
-    <header class="top"><h1>首頁</h1>${gearBtn()}</header>
+    <div class="home-head"><header class="top"><h1>首頁</h1>${gearBtn()}</header></div>
     <div class="search-row${state.searchFocus ? ' focus' : ''}">
-      <form class="search" id="sform">${I.search}<input id="q" type="search" enterkeyhint="search" placeholder="你想收聽什麼？" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
+      <form class="search" id="sform"><svg class="s-ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.6-4.6"/></svg><input id="q" type="search" enterkeyhint="search" placeholder="你想收聽什麼？" value="${esc(state.q)}" autocomplete="off" autocorrect="off" spellcheck="false"></form>
       <button class="text-btn search-cancel" data-act="searchCancel">取消</button>
     </div>
     <div id="sres">${searchBodyHTML()}</div>`;
@@ -475,7 +481,7 @@ function renderSearch(app) {
   });
   const onFocus = () => {
     if (state.searchFocus) return;
-    state.searchFocus = true; $('.search-row').classList.add('focus');
+    state.searchFocus = true; $('.search-row').classList.add('focus'); $('#app').classList.add('search-mode');
     if (!state.q) updateSearchBody();
   };
   $('#q').addEventListener('focus', onFocus);
@@ -486,7 +492,7 @@ function endSearch() {
   clearTimeout(searchT); searchSeq++;
   state.searchFocus = false; state.results = null; state.q = ''; state.loading = false;
   const q = $('#q'); if (q) { q.value = ''; q.blur(); }
-  $('.search-row')?.classList.remove('focus');
+  $('.search-row')?.classList.remove('focus'); $('#app').classList.remove('search-mode');
   updateSearchBody();
 }
 

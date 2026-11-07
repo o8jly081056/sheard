@@ -36,13 +36,42 @@ header.top .sub{color:var(--fg2);font-size:13px}
 .search{position:relative;margin-bottom:10px}
 .search input{padding-left:38px;height:44px;border-radius:12px}
 .search svg{position:absolute;left:12px;top:13px;opacity:.6}
-.search-row{display:flex;align-items:center;gap:0;margin-bottom:10px}
-.search-row .search{flex:1;margin:0;min-width:0}
-.search-cancel{max-width:0;overflow:hidden;white-space:nowrap;padding:6px 0;opacity:0;transition:max-width .22s ease,opacity .18s,padding .22s;color:var(--fg)}
-.search-row.focus .search-cancel{max-width:60px;opacity:1;padding:6px 0 6px 12px}
 .li .av.sq{border-radius:6px}
-.rs-row{cursor:pointer}
-.rs-x{width:36px;height:36px;flex:none;color:var(--fg3);font-size:16px;display:grid;place-items:center}
+/* ===== 搜尋（比照 Spotify iOS） ===== */
+.home-head{max-height:80px;overflow:hidden;transition:max-height .3s cubic-bezier(.32,.72,0,1),opacity .2s ease,transform .3s cubic-bezier(.32,.72,0,1)}
+.app.search-mode .home-head{max-height:0;opacity:0;transform:translateY(-16px)}
+.search-row{display:flex;align-items:center;margin-bottom:8px}
+.search-row .search{flex:1;margin:0;min-width:0}
+#sform input{height:48px;border:0;border-radius:6px;background:#fff;color:#121212;font-weight:600;padding-left:46px;transition:background .25s ease,color .25s ease,height .3s cubic-bezier(.32,.72,0,1),font-weight .2s}
+#sform input::placeholder{color:#535353;font-weight:600}
+#sform input:focus{outline:none}
+#sform .s-ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#121212;opacity:1;transition:color .25s}
+#sform input::-webkit-search-cancel-button{-webkit-appearance:none}
+.app.search-mode #sform input{height:38px;background:#2a2a2a;color:#fff;font-weight:400}
+.app.search-mode #sform input::placeholder{color:#a7a7a7;font-weight:400}
+.app.search-mode #sform .s-ic{color:#fff}
+.search-cancel{max-width:0;overflow:hidden;white-space:nowrap;padding:8px 0;opacity:0;color:#fff;font-weight:400;font-size:16px;transition:max-width .3s cubic-bezier(.32,.72,0,1),opacity .2s,padding .3s cubic-bezier(.32,.72,0,1)}
+.app.search-mode .search-cancel{max-width:70px;opacity:1;padding:8px 2px 8px 14px}
+.app .search-cancel{color:#fff;font-weight:400}
+.s-title{font-size:18px;font-weight:700;color:#fff;margin:14px 0 6px}
+.slist{display:flex;flex-direction:column}
+.srow{display:flex;align-items:center;gap:12px;padding:7px 0;cursor:pointer;min-width:0}
+.srow:active{opacity:.6}
+.srow-img{width:56px;height:56px;flex:none;background:var(--bg3);overflow:hidden;display:grid;place-items:center;color:var(--fg2);font-weight:700;position:relative}
+.srow-img.round{border-radius:50%}
+.srow-img img{width:100%;height:100%;object-fit:cover;display:block}
+.srow-txt{flex:1;min-width:0}
+.srow-t{font-size:16px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow-s{font-size:14px;color:#a7a7a7;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow-s .lbl{font-size:14px}
+.srow-x{width:40px;height:40px;flex:none;color:#a7a7a7;display:grid;place-items:center;margin-right:-8px}
+.srow-acts{display:flex;gap:6px;flex:none}
+.srow-acts .mini{width:32px;height:32px;background:transparent;border-color:var(--line)}
+.srow-acts .mini.heard{background:var(--heard);border-color:var(--heard)}
+.srow-acts .mini.want{background:var(--want);border-color:var(--want)}
+.srow-acts .mini.arch{background:#c9ccd1;border-color:#c9ccd1}
+.s-clear{margin:22px auto 8px;padding:8px 16px;border:1px solid #727272;border-radius:999px;color:#fff;font-weight:700;font-size:14px;background:transparent}
+.s-clear:active{transform:scale(.96)}
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;scrollbar-width:none}
 .chip{flex:none;padding:6px 14px;border-radius:999px;background:var(--bg2);color:var(--fg2);font-size:13px}
 .chip.on{background:var(--fg);color:#111;font-weight:600}
