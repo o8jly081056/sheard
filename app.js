@@ -494,7 +494,10 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-addEventListener('scroll', () => { if (!state.view) baseY = scrollY; }, { passive: true });
+addEventListener('scroll', () => {
+  if (!state.view) baseY = scrollY;
+  document.documentElement.classList.toggle('scrolled', scrollY > 4);   // 固定列下方的漸層：捲動時才出現
+}, { passive: true });
 function render() {
   if (state.view && !viewShown) baseSnap = { html: $('#app').innerHTML, cls: $('#app').className, y: baseY };
   viewShown = !!state.view;
