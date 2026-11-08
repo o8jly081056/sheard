@@ -492,7 +492,12 @@ const I = {
 const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設定">${I.gear}${syncOn() ? `<span id="syncDot" class="dot ${syncing ? 'busy' : (sbUser && !state.syncErr ? '' : 'off')}"></span>` : ''}</button>`;
 
 /* ================= 畫面 ================= */
+// 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
+let baseY = 0, baseSnap = null, viewShown = false;
+addEventListener('scroll', () => { if (!state.view) baseY = scrollY; }, { passive: true });
 function render() {
+  if (state.view && !viewShown) baseSnap = { html: $('#app').innerHTML, cls: $('#app').className, y: baseY };
+  viewShown = !!state.view;
   $('#app').classList.toggle('search-mode', state.tab === 'search' && !state.view && !!state.searchFocus);
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === state.tab && !state.view));
   const app = $('#app');
@@ -875,6 +880,78 @@ function closeSwipes(except) {
     row.dataset.justSwiped = '1'; setTimeout(() => { if (row) delete row.dataset.justSwiped; }, 350);
     row = null;
   });
+})();
+function goBack() {
+  if (!state.view) return;
+  const y = baseSnap?.y || 0;
+  state.view = null; render(); window.scrollTo(0, y);
+}
+// 從螢幕左邊緣往右滑：返回上一頁（比照 iOS，頁面跟著手指移動，底下露出上一頁）
+(() => {
+  const EDGE = 30;
+  let tok = 0, on = false, mode = null, x0 = 0, y0 = 0, t0 = 0, dx = 0, lastX = 0, lastT = 0, vx = 0, under = null;
+  const app = () => $('#app');
+  const W = () => innerWidth;
+  const paint = d => {
+    app().style.transform = `translate3d(${d}px,0,0)`;
+    if (under) {
+      under.firstChild.style.transform = `translate3d(${(d - W()) * 0.3}px,0,0)`;
+      under.lastChild.style.opacity = String(0.35 * (1 - d / W()));
+    }
+  };
+  const makeUnder = () => {
+    under = document.createElement('div'); under.className = 'swipe-under';
+    const pg = document.createElement('div');
+    pg.className = baseSnap?.cls || 'app'; pg.innerHTML = baseSnap?.html || '';
+    pg.style.marginTop = `-${baseSnap?.y || 0}px`;
+    const dim = document.createElement('div'); dim.className = 'swipe-dim';
+    under.append(pg, dim); document.body.appendChild(under);
+    app().classList.add('swiping');
+  };
+  const cleanup = () => {
+    const a = app(); a.style.transition = ''; a.style.transform = ''; a.classList.remove('swiping');
+    under?.remove(); under = null;
+  };
+  const animate = (to, done) => {
+    const ms = Math.max(160, Math.min(320, Math.abs(to - dx) / Math.max(0.6, Math.abs(vx))));
+    const ease = `transform ${ms}ms cubic-bezier(.2,.8,.2,1)`;
+    app().style.transition = ease;
+    if (under) { under.firstChild.style.transition = ease; under.lastChild.style.transition = `opacity ${ms}ms`; }
+    const k = ++tok;
+    requestAnimationFrame(() => { if (k === tok) paint(to); });
+    setTimeout(() => { if (k === tok) done(); }, ms + 20);
+  };
+  document.addEventListener('touchstart', e => {
+    on = false;
+    if (under) return;
+    if (!state.view || e.touches.length > 1 || $('#sheet').classList.contains('show')) return;
+    const t = e.touches[0]; if (t.clientX > EDGE) return;
+    on = true; mode = null; x0 = lastX = t.clientX; y0 = t.clientY; t0 = lastT = performance.now(); dx = 0; vx = 0;
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!on) return;
+    const t = e.touches[0], mx = t.clientX - x0, my = t.clientY - y0;
+    if (!mode) {
+      if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+      mode = mx > 0 && Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if (mode !== 'x') { on = false; return; }
+      makeUnder();
+    }
+    e.preventDefault();
+    const now = performance.now();
+    vx = (t.clientX - lastX) / Math.max(1, now - lastT); lastX = t.clientX; lastT = now;
+    dx = Math.max(0, mx);
+    app().style.transition = 'none'; paint(dx);
+  }, { passive: false });
+  const end = () => {
+    if (!on || mode !== 'x') { on = false; return; }
+    on = false;
+    const go = dx > W() * 0.4 || (vx > 0.45 && dx > 20);
+    if (go) animate(W(), () => { const y = baseSnap?.y || 0; state.view = null; app().style.transition = 'none'; app().style.transform = ''; render(); window.scrollTo(0, y); cleanup(); });
+    else animate(0, cleanup);
+  };
+  document.addEventListener('touchend', end);
+  document.addEventListener('touchcancel', end);
 })();
 /* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
 const AT_KEY = 'heard.artistTotals', AT_TTL = 3 * 864e5;
@@ -1289,7 +1366,7 @@ document.addEventListener('click', async e => {
   if (d.view) { db.settings.view ??= {}; db.settings.view[state.tab] = d.view; save(); return render(); }
   if (d.sort) { setSort(state.tab, d.sort); hideSheet(); window.scrollTo(0, 0); return render(); }
   switch (d.act) {
-    case 'back': state.view = null; return render();
+    case 'back': return goBack();
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
     case 'copyDiag': {

@@ -202,6 +202,10 @@ nav.tabs button.on .ic-off{display:none}
 .spinner{width:28px;height:28px;border:3px solid var(--bg3);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;margin:40px auto}
 .spinner.sm{width:20px;height:20px;margin:16px auto}
 @keyframes sp{to{transform:rotate(360deg)}}
+.swiping{position:relative;z-index:2;background:var(--bg);box-shadow:-8px 0 24px rgba(0,0,0,.45);will-change:transform}
+.swipe-under{position:fixed;inset:0;z-index:1;overflow:hidden;pointer-events:none;background:var(--bg)}
+.swipe-under>.app{will-change:transform}
+.swipe-dim{position:absolute;inset:0;background:#000;opacity:.35}
 .backbar{position:sticky;top:0;z-index:30;background:var(--bg);margin:calc(-12px - var(--safe-t)) -16px 8px;padding:var(--safe-t) 16px 0 10px}
 .back{display:inline-flex;align-items:center;gap:2px;color:var(--fg);font-size:17px;font-weight:500;padding:10px 14px 10px 0;min-height:44px}
 .back svg{width:26px;height:26px}
