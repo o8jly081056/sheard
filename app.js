@@ -494,7 +494,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v28';
+const APP_VER = 'v29';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1181,7 +1181,7 @@ async function renderArtist(app) {
         <div class="bar"><i style="width:${pct}%"></i></div>
       </div>
     </div>
-    ${chipBar('artist', ARTIST_OPTS, v.filter || null, 'margin-bottom:4px').replace(/<\/div>$/, `<button class="chip${v.unheard ? ' on' : ''}" data-act="unheardToggle">未聽過</button></div>`)}
+    ${chipBar('artist', ARTIST_OPTS, v.filter || null, 'margin-bottom:4px').replace('">', `"><button class="chip${v.unheard ? ' on' : ''}" data-act="unheardToggle">未聽過</button>`)}
     ${groups.map(([t, l]) => {
       const g = all.filter(a => inGroup(a, t));
       if (!g.length) return '';
