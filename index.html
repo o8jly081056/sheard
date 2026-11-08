@@ -38,7 +38,7 @@ header.top .sub{color:var(--fg2);font-size:13px}
 .search svg{position:absolute;left:12px;top:13px;opacity:.6}
 .li .av.sq{border-radius:6px}
 /* 搜尋轉場：只用 transform／opacity／顏色，不在動畫中重排整頁（時長 0.65 秒，iOS 彈簧感曲線） */
-.home-head{will-change:transform,opacity}
+.home-head{position:relative;z-index:11;will-change:transform,opacity}
 .app.search-mode .home-head{display:none}
 .search-row{display:flex;align-items:center;position:sticky;top:calc(var(--safe-t) + 12px);z-index:10;background:var(--bg);margin:0 -16px;padding:0 16px 8px;will-change:transform}
 .search-row::before{content:'';position:absolute;left:0;right:0;bottom:100%;height:calc(var(--safe-t) + 12px);background:var(--bg)}
