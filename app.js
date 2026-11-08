@@ -497,7 +497,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v34';
+const APP_VER = 'v35';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1099,12 +1099,15 @@ function renderArtists(app) {
     const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
     g.heard.push(a);
   });
-  const list = [...map.values()];
-  list.forEach(x => { x.pg = artistProgress(x.name); });
+  const all = [...map.values()];
+  all.forEach(x => { x.pg = artistProgress(x.name); });
+  const hideDone = (() => { try { return localStorage.getItem('heard.hideDoneArtists') === '1'; } catch (e) { return false; } })();
+  const list = hideDone ? all.filter(x => !(x.pg && x.pg.pct >= 100)) : all;
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
   app.innerHTML = `
-    <header class="top"><div><h1>歌手</h1>${list.length ? `<div class="sub">${list.length} 位歌手</div>` : ''}</div>${gearBtn()}</header>
+    <header class="top"><div><h1>歌手</h1>${all.length ? `<div class="sub">${all.length} 位歌手</div>` : ''}</div>${gearBtn()}</header>
+    ${all.length ? `<div class="chips" style="margin-bottom:4px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
     ${list.length ? `<div class="row-between" style="margin-bottom:6px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
       <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
@@ -1123,7 +1126,7 @@ function renderArtists(app) {
           ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
         <span class="muted">›</span></button></div>`;
     }).join('')}</div>`
-    : `<div class="empty"><b>還沒有歌手</b>標記第一張專輯後，歌手會出現在這裡</div>`}`;
+    : all.length ? '<div class="empty">所有歌手都聽完了</div>' : `<div class="empty"><b>還沒有歌手</b>標記第一張專輯後，歌手會出現在這裡</div>`}`;
 }
 
 // 歌手頁的篩選標籤（未聽過、作品類型）所有歌手共用；存在手機上，關掉 App、結束背景後仍會記住
@@ -1469,6 +1472,7 @@ document.addEventListener('click', async e => {
       catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
       return;
     }
+    case 'hideDone': { let on = false; try { on = localStorage.getItem('heard.hideDoneArtists') === '1'; localStorage.setItem('heard.hideDoneArtists', on ? '0' : '1'); } catch (e) {} return render(); }
     case 'unheardToggle': if (state.view) { state.view.unheard = !state.view.unheard; saveArtistFilter(state.view); } return render();
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
