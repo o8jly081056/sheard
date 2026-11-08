@@ -886,18 +886,31 @@ function goBack() {
   const y = baseSnap?.y || 0;
   state.view = null; render(); window.scrollTo(0, y);
 }
-// 從螢幕左邊緣往右滑：返回上一頁（比照 iOS，頁面跟著手指移動，底下露出上一頁）
+const TAB_ORDER = ['search', 'artists', 'heard'];
+function switchTab(t) {
+  if (t !== state.tab) { state.libFilter = null; state.libQ = ''; state.searchFocus = false; }
+  state.tab = t; state.view = null; window.scrollTo(0, 0); render();
+}
+// 左右滑手勢（整個畫面都能滑，不限邊緣）：
+// - 在歌手頁／封存頁：往右滑返回上一頁，頁面跟著手指，底下露出上一頁
+// - 在首頁／歌手／已聽過：往左滑到下一個分頁、往右滑到上一個分頁
+// - 歌手列表的列上往左滑仍是「刪除」；可以左右捲動的區塊不觸發
 (() => {
-  const EDGE = 30;
-  let tok = 0, on = false, mode = null, x0 = 0, y0 = 0, t0 = 0, dx = 0, lastX = 0, lastT = 0, vx = 0, under = null;
+  let tok = 0, on = false, busy = false, mode = null, kind = '', x0 = 0, y0 = 0, dx = 0, lastX = 0, lastT = 0, vx = 0, under = null, startRow = null;
   const app = () => $('#app');
   const W = () => innerWidth;
-  const paint = d => {
+  const ease = ms => `transform ${ms}ms cubic-bezier(.2,.8,.2,1), opacity ${ms}ms`;
+  const later = (fn, ms) => { const k = ++tok; requestAnimationFrame(() => { if (k === tok) fn(); }); return k; };
+  const paintBack = d => {
     app().style.transform = `translate3d(${d}px,0,0)`;
-    if (under) {
-      under.firstChild.style.transform = `translate3d(${(d - W()) * 0.3}px,0,0)`;
-      under.lastChild.style.opacity = String(0.35 * (1 - d / W()));
-    }
+    if (under) { under.firstChild.style.transform = `translate3d(${(d - W()) * 0.3}px,0,0)`; under.lastChild.style.opacity = String(0.35 * (1 - d / W())); }
+  };
+  const tabIdx = () => TAB_ORDER.indexOf(state.tab);
+  const paintTab = d => {
+    const i = tabIdx(), edge = (d > 0 && i === 0) || (d < 0 && i === TAB_ORDER.length - 1);
+    const v = edge ? d * 0.25 : d;                    // 第一個／最後一個分頁：有阻力
+    app().style.transform = `translate3d(${v}px,0,0)`;
+    app().style.opacity = String(1 - Math.min(0.5, Math.abs(v) / W() * 0.8));
   };
   const makeUnder = () => {
     under = document.createElement('div'); under.className = 'swipe-under';
@@ -908,47 +921,79 @@ function goBack() {
     under.append(pg, dim); document.body.appendChild(under);
     app().classList.add('swiping');
   };
-  const cleanup = () => {
-    const a = app(); a.style.transition = ''; a.style.transform = ''; a.classList.remove('swiping');
-    under?.remove(); under = null;
+  const reset = () => {
+    const a = app(); a.style.transition = ''; a.style.transform = ''; a.style.opacity = ''; a.classList.remove('swiping');
+    under?.remove(); under = null; busy = false;
   };
-  const animate = (to, done) => {
-    const ms = Math.max(160, Math.min(320, Math.abs(to - dx) / Math.max(0.6, Math.abs(vx))));
-    const ease = `transform ${ms}ms cubic-bezier(.2,.8,.2,1)`;
-    app().style.transition = ease;
-    if (under) { under.firstChild.style.transition = ease; under.lastChild.style.transition = `opacity ${ms}ms`; }
-    const k = ++tok;
-    requestAnimationFrame(() => { if (k === tok) paint(to); });
-    setTimeout(() => { if (k === tok) done(); }, ms + 20);
+  const animate = (paint, to, done) => {
+    const ms = Math.round(Math.max(160, Math.min(300, Math.abs(to - dx) / Math.max(0.7, Math.abs(vx)))));
+    app().style.transition = ease(ms);
+    if (under) { under.firstChild.style.transition = ease(ms); under.lastChild.style.transition = `opacity ${ms}ms`; }
+    const k = later(() => paint(to));
+    setTimeout(() => { if (k === tok) done(); }, ms + 30);
+  };
+  const scrollsX = el => {
+    for (; el && el !== document.body; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true;
+    }
+    return false;
   };
   document.addEventListener('touchstart', e => {
     on = false;
-    if (under) return;
-    if (!state.view || e.touches.length > 1 || $('#sheet').classList.contains('show')) return;
-    const t = e.touches[0]; if (t.clientX > EDGE) return;
-    on = true; mode = null; x0 = lastX = t.clientX; y0 = t.clientY; t0 = lastT = performance.now(); dx = 0; vx = 0;
+    if (busy || e.touches.length > 1 || $('#sheet').classList.contains('show')) return;
+    if (!state.view && state.tab === 'search' && state.searchFocus) return;
+    if (e.target.closest('input,textarea,select') || scrollsX(e.target)) return;
+    const t = e.touches[0];
+    on = true; mode = null; kind = state.view ? 'back' : 'tab';
+    x0 = lastX = t.clientX; y0 = t.clientY; lastT = performance.now(); dx = 0; vx = 0;
+    startRow = e.target.closest('.sw');
   }, { passive: true });
   document.addEventListener('touchmove', e => {
     if (!on) return;
     const t = e.touches[0], mx = t.clientX - x0, my = t.clientY - y0;
     if (!mode) {
-      if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
-      mode = mx > 0 && Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
-      if (mode !== 'x') { on = false; return; }
-      makeUnder();
+      if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+      if (Math.abs(mx) < Math.abs(my) * 1.2) { on = false; return; }   // 上下捲動
+      if (kind === 'back' && mx < 0) { on = false; return; }
+      // 歌手列表的列：往左滑交給刪除；已打開的列往右滑是收起
+      if (startRow && (mx < 0 || startRow.classList.contains('open'))) { on = false; return; }
+      mode = 'x'; busy = true;
+      if (kind === 'back') makeUnder();
+      x0 = t.clientX - (mx > 0 ? 1 : -1);             // 從這裡開始跟手，不會一下跳 10px
     }
     e.preventDefault();
     const now = performance.now();
     vx = (t.clientX - lastX) / Math.max(1, now - lastT); lastX = t.clientX; lastT = now;
-    dx = Math.max(0, mx);
-    app().style.transition = 'none'; paint(dx);
+    dx = t.clientX - x0;
+    app().style.transition = 'none';
+    if (kind === 'back') { dx = Math.max(0, dx); paintBack(dx); } else paintTab(dx);
   }, { passive: false });
   const end = () => {
     if (!on || mode !== 'x') { on = false; return; }
     on = false;
-    const go = dx > W() * 0.4 || (vx > 0.45 && dx > 20);
-    if (go) animate(W(), () => { const y = baseSnap?.y || 0; state.view = null; app().style.transition = 'none'; app().style.transform = ''; render(); window.scrollTo(0, y); cleanup(); });
-    else animate(0, cleanup);
+    const fast = Math.abs(vx) > 0.45 && Math.abs(dx) > 24 && Math.sign(vx) === Math.sign(dx);
+    if (kind === 'back') {
+      if (dx > W() * 0.35 || (fast && dx > 0)) animate(paintBack, W(), () => {
+        const y = baseSnap?.y || 0; state.view = null;
+        app().style.transition = 'none'; app().style.transform = '';
+        render(); window.scrollTo(0, y); reset();
+      });
+      else animate(paintBack, 0, reset);
+      return;
+    }
+    const dir = dx < 0 ? 1 : -1, next = TAB_ORDER[tabIdx() + dir];
+    if (next && (Math.abs(dx) > W() * 0.3 || fast)) {
+      animate(paintTab, -dir * W(), () => {
+        const a = app();
+        a.style.transition = 'none';
+        switchTab(next);
+        a.style.transform = `translate3d(${dir * W() * 0.3}px,0,0)`; a.style.opacity = '0';
+        void a.offsetHeight;
+        a.style.transition = ease(240);
+        const k = later(() => { a.style.transform = ''; a.style.opacity = ''; });
+        setTimeout(() => { if (k === tok) reset(); }, 270);
+      });
+    } else animate(paintTab, 0, reset);
   };
   document.addEventListener('touchend', end);
   document.addEventListener('touchcancel', end);
@@ -1348,9 +1393,8 @@ document.addEventListener('click', async e => {
     state.view = { type: 'artist', id: d.artist || '', name: d.name }; window.scrollTo(0, 0); return render();
   }
   if (d.tab) {
-    if (d.tab !== state.tab) { state.libFilter = null; state.libQ = ''; state.searchFocus = false; }
-    else if (d.tab === 'search' && !state.view) { state.results = null; state.q = ''; }
-    state.tab = d.tab; state.view = null; window.scrollTo(0, 0); return render();
+    if (d.tab === state.tab && d.tab === 'search' && !state.view) { state.results = null; state.q = ''; }
+    return switchTab(d.tab);
   }
   if (d.f) {
     const v = d.v || null;
