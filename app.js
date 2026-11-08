@@ -820,7 +820,7 @@ function openSortMenu() {
 /* ---------- 封存 ---------- */
 function renderArchive(app) {
   const list = remember(Object.values(db.albums).filter(a => a.status === 'archived').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
-  app.innerHTML = `<button class="back" data-act="back">${I.back}返回</button>
+  app.innerHTML = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>
     <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div></header>
     ${list.length ? `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`
       : '<div class="empty">沒有封存的唱片</div>'}`;
@@ -970,7 +970,7 @@ function renderArtists(app) {
 
 async function renderArtist(app) {
   const v = state.view;
-  const head = `<button class="back" data-act="back">${I.back}返回</button>`;
+  const head = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>`;
   const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(v.name));
   if (!v.albums) {
     app.innerHTML = `${head}<h2 style="margin:4px 0">${esc(v.name)}</h2><div class="spinner"></div>`;
