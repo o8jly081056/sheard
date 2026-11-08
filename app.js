@@ -179,25 +179,41 @@ async function searchArtistsTop(q) {
   const nq = norm(q);
   return list.sort((a, b) => (norm(b.name) === nq) - (norm(a.name) === nq)).slice(0, 5);
 }
-async function artistAlbums(id, groups = 'album,single,compilation') {
-  // Spotify 文件：此端點 limit 最大 10（2026 起），超過可能回傳空結果；用 10 筆一頁翻頁抓完
-  // 先帶 market，若出錯或是空的，再不帶 market 試一次
-  const tries = ['&market=from_token', ''];
-  let lastErr = null, result = [];
-  for (const mk of tries) {
-    try {
-      const out = [];
-      for (let off = 0; off < 300; off += 10) {
-        const j = await spCached(`/artists/${id}/albums?include_groups=${groups}${mk}&limit=10&offset=${off}`);
-        out.push(...(j?.items || []).filter(Boolean));
-        if (!j?.next || !(j?.items || []).length) break;
+const isFresh = path => cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path));
+let discBusy = 0;
+// 抓歌手在 Spotify 上的全部作品（專輯、單曲和迷你專輯、合輯，不含參與的專輯）
+// 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
+// 回傳陣列；沒抓完時陣列帶 incomplete=true 與 err
+async function artistAlbums(id, groups = 'album,single,compilation', onPage) {
+  const out = [];
+  const finish = (err) => {
+    const r = dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
+    if (err) { r.incomplete = true; r.err = err.message || String(err); }
+    return r;
+  };
+  discBusy++;
+  try {
+    let mk = '&market=from_token';
+    for (let off = 0; off < 400; off += 10) {
+      const path = `/artists/${id}/albums?include_groups=${groups}${mk}&limit=10&offset=${off}`;
+      const net = !isFresh(path);
+      let j;
+      try { j = await spCached(path); }
+      catch (e) {
+        // 第一頁帶 market 失敗（非限流）就改成不帶 market 再試
+        if (off === 0 && mk && !/限制|上限|拒絕|過期|尚未/.test(e.message)) { mk = ''; off -= 10; continue; }
+        if (!out.length) throw e;
+        return finish(e);
       }
-      result = dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
-      if (result.length) return result;
-    } catch (e) { lastErr = e; if (/拒絕存取|過期|頻繁/.test(e.message)) throw e; }
-  }
-  if (!result.length && lastErr) throw lastErr;
-  return result;
+      const items = (j?.items || []).filter(Boolean);
+      if (off === 0 && mk && !items.length) { mk = ''; off -= 10; continue; }
+      out.push(...items);
+      if (!j?.next || !items.length) break;
+      if (onPage) onPage(finish());
+      if (net) await sleep(350);           // 放慢翻頁速度，避免被 Spotify 限流
+    }
+    return finish();
+  } finally { discBusy--; }
 }
 async function resolveArtistId(name) {
   const j = await spCached(`/search?type=artist&limit=10&q=${encodeURIComponent(name)}`);
@@ -839,6 +855,7 @@ function queueArtistTotal(name, id) {
 async function pumpArtistTotals() {
   if (cooldownLeft()) { setTimeout(pumpArtistTotals, cooldownLeft() * 1000 + 500); return; }
   if (atDone >= 8) return;
+  if (discBusy) { setTimeout(pumpArtistTotals, 4000); return; }
   while (atRunning < 1 && atQueue.size) {
     atDone++;
     const name = atQueue.values().next().value; atQueue.delete(name); atRunning++;
@@ -850,7 +867,7 @@ async function pumpArtistTotals() {
         const albums = id ? await artistAlbums(id) : null;
         const img = id ? await artistImage(id).catch(() => '') : '';
         // 如果這段時間使用者已經點進歌手頁更新過，就不要覆蓋
-        if (albums?.length && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
+        if (albums?.length && !albums.incomplete && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
       } catch (e) {}
       atRunning--;
       clearTimeout(atRenderT);
@@ -902,19 +919,29 @@ async function renderArtist(app) {
   const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(v.name));
   if (!v.albums) {
     app.innerHTML = `${head}<h2 style="margin:4px 0">${esc(v.name)}</h2><div class="spinner"></div>`;
+    const done = list => {
+      v.loading = false; v.albums = list; v.err = list.incomplete ? list.err : '';
+      if (v.err && cooldownLeft()) setTimeout(() => { if (state.view === v) { delete v.albums; delete v.err; v.cached = false; render(); } }, cooldownLeft() * 1000 + 300);
+    };
     try {
       if (!spOn()) v.albums = [];
       else {
         if (!isSpId(v.id)) v.id = await resolveArtistId(v.name);
-        v.albums = v.id ? await artistAlbums(v.id) : [];
+        if (!v.id) v.albums = [];
+        else {
+          v.loading = true;
+          const list = await artistAlbums(v.id, undefined, part => {
+            if (state.view !== v) return;
+            const first = !v.albums; v.albums = part;
+            if (first || !$('#sheet.show')) render();
+          });
+          done(list);
+        }
       }
-    } catch (e) {
-      v.albums = []; v.err = e.message || '載入失敗';
-      if (cooldownLeft()) setTimeout(() => { if (state.view === v) { delete v.albums; delete v.err; v.cached = false; render(); } }, cooldownLeft() * 1000 + 300);
-    }
+    } catch (e) { done(Object.assign([], { incomplete: true, err: e.message || '載入失敗' })); }
     if (state.view !== v) return;
   }
-  if (v.albums.length && !v.cached) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
+  if (v.albums.length && !v.cached && !v.loading && !v.err) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
   if (v.img === undefined && spOn() && isSpId(v.id)) {
     v.img = artistTotals[norm(v.name)]?.img || null;
     artistImage(v.id).then(img => {
@@ -951,6 +978,8 @@ async function renderArtist(app) {
       const h = g.filter(a => isDone(statusOf(albumKey(a)))).length;
       return `<div class="section-h"><span>${l} · ${h}/${g.length}</span></div><div class="alist">${g.map(a => albumRow(a)).join('')}</div>`;
     }).join('')}
+    ${v.loading ? '<div class="muted small" style="text-align:center;padding:14px 0">載入更多作品…</div>' : ''}
+    ${v.err && all.length ? `<div class="empty" style="padding:18px 0">還有作品沒載入完<br><span class="small">${esc(v.err)}</span><br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>` : ''}
     ${!all.length ? (v.err ? `<div class="empty">載入失敗<br><span class="small">${esc(v.err)}</span><br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>`
       : v.filter ? '<div class="empty">這個分類沒有作品</div>' : `<div class="empty">Spotify 沒有回傳作品<br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>`) : ''}`;
 }
