@@ -497,7 +497,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v31';
+const APP_VER = 'v32';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1126,8 +1126,15 @@ function renderArtists(app) {
     : `<div class="empty"><b>還沒有歌手</b>標記第一張專輯後，歌手會出現在這裡</div>`}`;
 }
 
+// 歌手頁的篩選標籤（未聽過、作品類型）會記住，下次點進任何歌手都沿用
+const AF_KEY = 'heard.artistFilter';
+function saveArtistFilter(v) { try { localStorage.setItem(AF_KEY, JSON.stringify({ filter: v.filter || null, unheard: !!v.unheard })); } catch (e) {} }
 async function renderArtist(app) {
   const v = state.view;
+  if (!('unheard' in v)) {
+    let f = {}; try { f = JSON.parse(localStorage.getItem(AF_KEY)) || {}; } catch (e) {}
+    v.unheard = !!f.unheard; v.filter = RELEASES.some(r => r[0] === f.filter) ? f.filter : null;
+  }
   const head = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>`;
   const local = myAlbums().filter(a => norm(a.artist) === norm(v.name));
   if (!v.albums) {
@@ -1438,7 +1445,7 @@ document.addEventListener('click', async e => {
   if (d.f) {
     const v = d.v || null;
     if (d.f === 'lib') state.libFilter = v;
-    else if (d.f === 'artist') { state.view.filter = v; }
+    else if (d.f === 'artist') { state.view.filter = v; saveArtistFilter(state.view); }
     else if (d.f === 'search') {
       state.sf = v;
       const need = v === 'artist' ? 'artist' : 'album';
@@ -1460,7 +1467,7 @@ document.addEventListener('click', async e => {
       catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
       return;
     }
-    case 'unheardToggle': if (state.view) state.view.unheard = !state.view.unheard; return render();
+    case 'unheardToggle': if (state.view) { state.view.unheard = !state.view.unheard; saveArtistFilter(state.view); } return render();
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
