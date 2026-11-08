@@ -766,7 +766,7 @@ function renderLib(app) {
 
 /* ---------- 排序 ---------- */
 // 筆畫排序：從第一個字開始逐字比筆畫（同筆畫數同一個字排在一起），不依賴手機瀏覽器的排序規則
-// strokes.js 內是依筆畫排好的常用漢字表；中文名在前，英文／數字在後依字母排
+// strokes.js 內是依筆畫排好的常用漢字表；英文／數字開頭的排在中文前面（依字母），再接中文依筆畫
 const colLatin = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 let strokeRank = null;
 const rankOf = ch => (strokeRank ||= new Map([...(window.STROKE_ORDER || '')].map((c, i) => [c, i]))).get(ch);
@@ -776,7 +776,7 @@ const colStroke = { compare(a, b) {
     if (i >= A.length) return -1; if (i >= B.length) return 1;
     const ra = rankOf(A[i]), rb = rankOf(B[i]);
     if (ra !== undefined && rb !== undefined) { if (ra !== rb) return ra - rb; continue; }
-    if (ra !== undefined) return -1; if (rb !== undefined) return 1;
+    if (ra !== undefined) return 1; if (rb !== undefined) return -1;   // 由少到多：英文／數字在中文前面
     return colLatin.compare(A.slice(i).join(''), B.slice(i).join(''));
   }
   return 0;
