@@ -776,7 +776,7 @@ const SORTS = {
 // 歌手頁的排序：筆畫、聽過進度
 const ARTIST_SORTS = {
   pct:  { label: () => '聽過進度', dirs: ['低 → 高', '高 → 低'], def: true,  cmp: (a, b) => (a.pg ? a.pg.pct : -1) - (b.pg ? b.pg.pct : -1) || (a.pg?.heard || a.heard.length) - (b.pg?.heard || b.heard.length) },
-  name: { label: () => '歌手',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.name, b.name) }
+  name: { label: () => '筆畫',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.name, b.name) }
 };
 const sortsFor = st => st === 'artists' ? ARTIST_SORTS : SORTS;
 function sortOf(st) {
