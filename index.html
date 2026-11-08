@@ -42,7 +42,7 @@ header.top .sub{color:var(--fg2);font-size:13px}
 .app.search-mode .home-head{display:none}
 .search-row{display:flex;align-items:center;position:sticky;top:calc(var(--safe-t) + 12px);z-index:10;background:var(--bg);margin:0 -16px;padding:0 16px 8px;will-change:transform}
 html.scrolled .search-row::after,html.scrolled .backbar::after{opacity:1}
-.search-row::after{content:'';position:absolute;left:0;right:0;top:100%;height:24px;background:linear-gradient(to bottom,rgba(18,18,18,1) 0%,rgba(18,18,18,.6) 45%,rgba(18,18,18,0) 100%);pointer-events:none;opacity:0;transition:opacity .15s linear}
+.search-row::after{content:'';position:absolute;left:0;right:0;top:100%;height:40px;background:linear-gradient(to bottom,rgba(18,18,18,1) 0%,rgba(18,18,18,.6) 45%,rgba(18,18,18,0) 100%);pointer-events:none;opacity:0;transition:opacity .15s linear}
 .search-row.stuck::after{opacity:1}
 .search-row::before{content:'';position:absolute;left:0;right:0;bottom:100%;height:calc(var(--safe-t) + 12px);background:var(--bg)}
 #sres{will-change:transform,opacity}
