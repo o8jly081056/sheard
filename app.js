@@ -494,7 +494,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v27';
+const APP_VER = 'v28';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1181,13 +1181,16 @@ async function renderArtist(app) {
         <div class="bar"><i style="width:${pct}%"></i></div>
       </div>
     </div>
-    ${chipBar('artist', ARTIST_OPTS, v.filter || null, 'margin-bottom:4px')}
+    ${chipBar('artist', ARTIST_OPTS, v.filter || null, 'margin-bottom:4px').replace(/<\/div>$/, `<button class="chip${v.unheard ? ' on' : ''}" data-act="unheardToggle">未聽過</button></div>`)}
     ${groups.map(([t, l]) => {
       const g = all.filter(a => inGroup(a, t));
       if (!g.length) return '';
       const h = g.filter(a => isDone(statusOf(albumKey(a)))).length;
-      return `<div class="section-h"><span>${l} · ${h}/${g.length}</span></div><div class="alist">${g.map(a => albumRow(a)).join('')}</div>`;
+      const shown = v.unheard ? g.filter(a => !isDone(statusOf(albumKey(a)))) : g;
+      if (!shown.length) return '';
+      return `<div class="section-h"><span>${l} · ${h}/${g.length}</span></div><div class="alist">${shown.map(a => albumRow(a)).join('')}</div>`;
     }).join('')}
+    ${v.unheard && all.length && all.every(a => isDone(statusOf(albumKey(a)))) ? '<div class="empty">全部都聽過了</div>' : ''}
     ${v.loading ? '<div class="muted small" style="text-align:center;padding:14px 0">載入更多作品…</div>' : ''}
     ${v.err && all.length ? `<div class="empty" style="padding:18px 0">還有作品沒載入完<br><span class="small">${esc(v.err)}</span><br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>` : ''}
     ${!all.length ? (v.err ? `<div class="empty">載入失敗<br><span class="small">${esc(v.err)}</span><br><button class="btn sm" style="margin-top:12px" data-act="artistRetry">重試</button></div>`
@@ -1453,6 +1456,7 @@ document.addEventListener('click', async e => {
       catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
       return;
     }
+    case 'unheardToggle': if (state.view) state.view.unheard = !state.view.unheard; return render();
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
