@@ -660,6 +660,12 @@ function enterSearchMode() {
   const { app, head, row, res } = smEls(); if (!head || !row) return;
   clearTimeout(smT);
   const h = head.offsetHeight + parseFloat(getComputedStyle(head.firstElementChild).marginBottom || 0);
+  if (scrollY >= h - 1) {                // 已經往下捲、搜尋欄固定在頂部：直接切換，不做位移動畫
+    app.classList.add('search-mode'); row.classList.add('focus');
+    if (!state.q) res.innerHTML = searchBodyHTML();
+    window.scrollTo(0, 0); return;
+  }
+  if (scrollY > 0) window.scrollTo(0, 0);
   row.classList.add('focus');
   if (!state.q) { res.style.opacity = '0'; res.innerHTML = searchBodyHTML(); }
   void row.offsetHeight;
@@ -676,6 +682,7 @@ function enterSearchMode() {
 function exitSearchMode() {
   const { app, head, row, res } = smEls();
   clearTimeout(smT);
+  if (scrollY > 0) window.scrollTo(0, 0);
   if (!head || !row) { app.classList.remove('search-mode'); return updateSearchBody(); }
   [head, row, res].forEach(e => { e.style.transition = 'none'; });
   app.classList.remove('search-mode');

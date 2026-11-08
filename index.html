@@ -40,7 +40,8 @@ header.top .sub{color:var(--fg2);font-size:13px}
 /* 搜尋轉場：只用 transform／opacity／顏色，不在動畫中重排整頁（時長 0.65 秒，iOS 彈簧感曲線） */
 .home-head{will-change:transform,opacity}
 .app.search-mode .home-head{display:none}
-.search-row{display:flex;align-items:center;margin-bottom:8px;contain:layout style;will-change:transform}
+.search-row{display:flex;align-items:center;position:sticky;top:calc(var(--safe-t) + 12px);z-index:10;background:var(--bg);margin:0 -16px;padding:0 16px 8px;will-change:transform}
+.search-row::before{content:'';position:absolute;left:0;right:0;bottom:100%;height:calc(var(--safe-t) + 12px);background:var(--bg)}
 #sres{will-change:transform,opacity}
 #sform input{height:44px;border:0;border-radius:6px;background:#fff;color:#121212;font-weight:600;padding-left:46px;transition:background-color .65s cubic-bezier(.32,.72,0,1),color .65s cubic-bezier(.32,.72,0,1)}
 .search-row.focus #sform input{background:#2a2a2a;color:#fff;font-weight:400}
