@@ -497,7 +497,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v30';
+const APP_VER = 'v31';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1482,6 +1482,19 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { sy
 $('#scrim').onclick = () => closeSheet();
 // 面板打開時，在背景遮罩上滑動不會捲動底下的頁面
 $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+// 面板打開時，後面的頁面不能被捲動：面板內容捲到底（或本來就不用捲）時，擋掉往後面頁面傳的捲動
+(() => {
+  let sy = 0;
+  document.addEventListener('touchstart', e => { sy = e.touches[0]?.clientY || 0; }, { passive: true, capture: true });
+  document.addEventListener('touchmove', e => {
+    const s = $('#sheet');
+    if (!s.classList.contains('show') || e.defaultPrevented) return;
+    if (!s.contains(e.target)) { e.preventDefault(); return; }
+    const dy = (e.touches[0]?.clientY || 0) - sy;
+    const max = s.scrollHeight - s.clientHeight;
+    if (max <= 1 || (dy < 0 && s.scrollTop >= max - 1) || (dy > 0 && s.scrollTop <= 0)) e.preventDefault();
+  }, { passive: false });
+})();
 (() => { // 下滑關閉：拖曳時 1:1 跟手，放開時依距離或速度決定收回或彈回
   const s = $('#sheet'), scrim = $('#scrim');
   let y0 = null, dy = 0, dragging = false, lastY = 0, lastT = 0, v = 0;
