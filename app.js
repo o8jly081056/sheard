@@ -152,8 +152,8 @@ const dedupe = list => { const m = new Map(); list.forEach(a => { const k = albu
 // Spotify 搜尋：先帶 market，失敗就不帶再試一次（開發模式有時會拒絕某些參數）
 async function spSearch(type, q, offset = 0) {
   const enc = encodeURIComponent(q);
-  try { return await spCached(`/search?type=${type}&limit=10&offset=${offset}&market=from_token&q=${enc}`); }
-  catch (e) { if (offset) throw e; return await spCached(`/search?type=${type}&limit=10&q=${enc}`); }
+  // 帶 market 的搜尋會被開發模式拒絕（403），一律不帶
+  return spCached(offset ? `/search?type=${type}&limit=10&offset=${offset}&q=${enc}` : `/search?type=${type}&limit=10&q=${enc}`);
 }
 async function searchAlbums(q) {
   const pages = await Promise.all([0].map(o => spSearch('album', q, o).catch(e => ({ err: e }))));
@@ -223,23 +223,28 @@ async function artistAlbums(id, name, onPage, groups = 'album,single,compilation
       if (!apiErr && out.length) return finish();   // 端點回傳空的也改用搜尋
     }
     if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
-    // 備援：搜尋
-    const q = `artist:"${name}"`;
-    let miss = 0;
-    for (let off = 0; off < 300; off += 10) {
-      const path = `/search?type=album&limit=10&offset=${off}&market=from_token&q=${encodeURIComponent(q)}`;
-      const net = !isFresh(path);
-      let j;
-      try { j = off === 0 ? await spSearch('album', q, 0) : await spCached(path); }
-      catch (e) { if (!out.length) throw e; return finish(e); }
-      const items = (j?.albums?.items || []).filter(Boolean);
-      const mine = items.filter(al => (al.artists || []).some(x => x.id === id) && al.album_type !== 'appears_on');
-      out.push(...mine);
-      miss = mine.length ? 0 : miss + 1;
-      if (!j?.albums?.next || !items.length || miss >= 2) break;
-      if (onPage && mine.length) onPage(finish());
-      if (net) await sleep(350);
+    // 備援：搜尋。artist: 篩選對中文名常常沒結果，所以同時用名字直接搜，合併後只留演出者有他的
+    let searchErr = null;
+    for (const q of [name, `artist:${name}`]) {
+      let miss = 0;
+      for (let off = 0; off < 200; off += 10) {
+        const path = off ? `/search?type=album&limit=10&offset=${off}&q=${encodeURIComponent(q)}` : `/search?type=album&limit=10&q=${encodeURIComponent(q)}`;
+        const net = !isFresh(path);
+        let j;
+        try { j = await spCached(path); }
+        catch (e) { searchErr = e; break; }
+        const items = (j?.albums?.items || []).filter(Boolean);
+        const mine = items.filter(al => (al.artists || []).some(x => x.id === id));
+        const before = out.length; out.push(...mine);
+        miss = mine.length ? 0 : miss + 1;
+        if (onPage && out.length > before) onPage(finish());
+        if (!j?.albums?.next || !items.length || miss >= 2) break;
+        if (net) await sleep(350);
+      }
+      if (searchErr && /限制|上限/.test(searchErr.message)) break;
     }
+    if (!out.length && (searchErr || apiErr)) throw searchErr || apiErr;
+    if (searchErr && /限制|上限/.test(searchErr.message)) return finish(searchErr);
     return finish();
   } finally { discBusy--; }
 }
@@ -252,7 +257,7 @@ async function resolveArtistId(name) {
 // 舊資料（沒有 Spotify id）→ 找出對應的 Spotify 專輯
 async function resolveAlbum(a) {
   const q = encodeURIComponent(`album:${a.title} artist:${a.artist.split(' & ')[0]}`);
-  const j = await spCached(`/search?type=album&limit=10&market=from_token&q=${q}`);
+  const j = await spCached(`/search?type=album&limit=10&q=${q}`);
   const k = albumKey(a);
   const hit = (j?.albums?.items || []).filter(Boolean).map(fromSpotify).find(x => albumKey(x) === k);
   return hit || null;
