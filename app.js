@@ -126,6 +126,8 @@ const pcache = (() => { try { return JSON.parse(localStorage.getItem(PC_KEY)) ||
 const ttlFor = path => path.startsWith('/search') ? 864e5            // 搜尋：1 天
   : /^\/artists\/[^/]+\/albums/.test(path) ? 7 * 864e5              // 歌手作品：7 天
   : /^\/(artists|albums)\//.test(path) ? 30 * 864e5 : 0;            // 歌手資料、專輯曲目：30 天
+const isEmptyResp = j => !j || (Array.isArray(j.items) && !j.items.length) || (j.albums && !(j.albums.items || []).length) || (j.artists && !j.name && !(j.artists.items || []).length);
+Object.keys(pcache).forEach(k => { if (isEmptyResp(pcache[k]?.j)) delete pcache[k]; });
 let pcSaveT = null;
 function pcSave() {
   clearTimeout(pcSaveT);
@@ -141,7 +143,7 @@ async function spCached(path) {
   const ttl = ttlFor(path), hit = pcache[path];
   if (ttl && hit && Date.now() - hit.t < ttl) { cache.set(path, hit.j); return hit.j; }
   const j = await sp(path); cache.set(path, j);
-  if (ttl) { pcache[path] = { t: Date.now(), j }; pcSave(); }
+  if (ttl && !isEmptyResp(j)) { pcache[path] = { t: Date.now(), j }; pcSave(); }
   return j;
 }
 const isSpId = id => /^[0-9A-Za-z]{22}$/.test(id || '');
@@ -214,13 +216,13 @@ async function artistAlbums(id, name, onPage, groups = 'album,single,compilation
         const items = (j?.items || []).filter(Boolean);
         if (off === 0 && mk && !items.length) { mk = ''; off -= 10; continue; }
         out.push(...items);
-        if (!j?.next || !items.length) return finish();
+        if (!j?.next || !items.length) break;
         if (onPage) onPage(finish());
         if (net) await sleep(350);
       }
-      if (!apiErr) return finish();
+      if (!apiErr && out.length) return finish();   // 端點回傳空的也改用搜尋
     }
-    if (!name) { if (apiErr || !out.length) throw apiErr || new Error('Spotify 暫時限制請求'); return finish(apiErr); }
+    if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
     // 備援：搜尋
     const q = `artist:"${name}"`;
     let miss = 0;
