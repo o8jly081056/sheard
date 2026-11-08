@@ -494,12 +494,18 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v23';
+const APP_VER = 'v24';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
   if (!state.view) baseY = y;
   document.documentElement.classList.toggle('scrolled', y > 4);
+  // 搜尋欄固定在頂部時，下方顯示漸層遮罩
+  const sr = !state.view && document.querySelector('#app .search-row');
+  if (sr) {
+    const stickTop = parseFloat(getComputedStyle(sr).top) || 0;
+    sr.classList.toggle('stuck', y > 0 && sr.getBoundingClientRect().top <= stickTop + 0.5);
+  }
   // 頁面標題往上推出畫面時淡出
   const hd = !state.view && document.querySelector('#app > .home-head > header.top, #app > header.top');
   if (hd) {
