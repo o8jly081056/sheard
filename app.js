@@ -494,10 +494,26 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-addEventListener('scroll', () => {
-  if (!state.view) baseY = scrollY;
-  document.documentElement.classList.toggle('scrolled', scrollY > 4);   // 固定列下方的漸層：捲動時才出現
-}, { passive: true });
+const APP_VER = 'v21';
+const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
+function onPageScroll() {
+  const y = pageY();
+  if (!state.view) baseY = y;
+  document.documentElement.classList.toggle('scrolled', y > 4);
+  // 頁面標題往上推出畫面時淡出
+  const hd = !state.view && document.querySelector('#app > .home-head > header.top, #app > header.top');
+  if (hd) {
+    const r = hd.getBoundingClientRect(), topLine = parseFloat(getComputedStyle($('#app')).paddingTop) || 0;
+    const p = Math.min(1, Math.max(0, (topLine - r.top) / Math.max(1, r.height)));
+    hd.style.opacity = p ? String(1 - p) : '';
+  }
+}
+// iPhone 主畫面 App 有時不會在 window 觸發 scroll，所以多種方式一起偵測
+addEventListener('scroll', onPageScroll, { passive: true });
+document.addEventListener('scroll', onPageScroll, { passive: true, capture: true });
+document.addEventListener('touchmove', () => requestAnimationFrame(onPageScroll), { passive: true });
+document.addEventListener('touchend', () => { onPageScroll(); setTimeout(onPageScroll, 300); setTimeout(onPageScroll, 1200); }, { passive: true });
+setInterval(onPageScroll, 500);
 function render() {
   if (state.view && !viewShown) baseSnap = { html: $('#app').innerHTML, cls: $('#app').className, y: baseY };
   viewShown = !!state.view;
@@ -1296,7 +1312,7 @@ function openMenu() {
         ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>`;
   const spBlock = !CFG.SPOTIFY_CLIENT_ID ? '<div class="muted small">尚未設定 Spotify（見 SETUP.md）</div>'
     : spOn() ? `<div class="panel row-between"><span>✓ 已連結 Spotify</span><button class="btn sm" data-act="spLogout">中斷連結</button></div>
-      <button class="btn sm" style="margin-top:10px" data-act="copyDiag">複製診斷資料</button>
+      <button class="btn sm" style="margin-top:10px" data-act="copyDiag">複製診斷資料</button><div class="muted small" style="margin-top:8px">版本 ${APP_VER}</div>
       <details class="diag"><summary>連線診斷（最近 ${spLog.length} 次請求）</summary>${spLog.map(x => `<div class="diag-row ${x.ok ? '' : 'bad'}">
         <span>${new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false })}</span><code>${esc(decodeURIComponent(x.path).slice(0, 90))}</code><b>${esc(x.info)}</b></div>`).join('') || '<div class="muted small">還沒有紀錄</div>'}</details>`
     : `<button class="btn primary" data-act="spLogin">連結 Spotify</button>`;
@@ -1424,7 +1440,7 @@ document.addEventListener('click', async e => {
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
     case 'copyDiag': {
-      const txt = JSON.stringify({ v: 'diag2', now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
+      const txt = JSON.stringify({ v: 'diag2', app: APP_VER, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
         tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES,
         log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
       try { await navigator.clipboard.writeText(txt); toast('已複製，貼給 Claude 就好'); }
