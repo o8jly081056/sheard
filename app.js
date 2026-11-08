@@ -158,7 +158,7 @@ async function spSearch(type, q, offset = 0) {
 async function searchAlbums(q) {
   const pages = await Promise.all([0].map(o => spSearch('album', q, o).catch(e => ({ err: e }))));
   if (pages.every(p => !p || p.err)) throw pages[0]?.err || new Error('搜尋失敗');
-  return dedupe(pages.flatMap(p => p?.albums?.items || []).filter(Boolean).map(fromSpotify));
+  return dedupe(pages.flatMap(p => p?.albums?.items || []).filter(Boolean).map(fromSpotify)).filter(notComp);
 }
 async function searchArtists(q) {
   const enc = encodeURIComponent(q);
@@ -188,11 +188,11 @@ async function searchArtistsTop(q) {
 }
 const isFresh = path => cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path));
 let discBusy = 0;
-// 抓歌手在 Spotify 上的全部作品（專輯、單曲和迷你專輯、合輯，不含參與的專輯）
+// 抓歌手在 Spotify 上的全部作品（專輯、單曲和迷你專輯；不含參與的專輯與合輯）
 // 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
 // 回傳陣列；沒抓完時陣列帶 incomplete=true 與 err
 // 先用歌手作品端點；被擋或失敗時，改用搜尋 artist:"名字" 找出他的作品（只留演出者裡有他的，等於不含參與的專輯）
-async function artistAlbums(id, name, onPage, groups = 'album,single,compilation') {
+async function artistAlbums(id, name, onPage, groups = 'album,single') {
   const out = [];
   const finish = (err) => {
     const r = dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
@@ -234,7 +234,7 @@ async function artistAlbums(id, name, onPage, groups = 'album,single,compilation
         try { j = await spCached(path); }
         catch (e) { searchErr = e; break; }
         const items = (j?.albums?.items || []).filter(Boolean);
-        const mine = items.filter(al => (al.artists || []).some(x => x.id === id));
+        const mine = items.filter(al => al.album_type !== 'compilation' && (al.artists || []).some(x => x.id === id));
         const before = out.length; out.push(...mine);
         miss = mine.length ? 0 : miss + 1;
         if (onPage && out.length > before) onPage(finish());
@@ -383,7 +383,7 @@ async function spRecent() {
   const j = await sp('/me/player/recently-played?limit=50');
   const m = new Map();
   (j?.items || []).forEach(it => { const a = fromSpotify(it.track.album); const k = albumKey(a); if (!m.has(k)) m.set(k, a); });
-  return remember([...m.values()]);
+  return remember([...m.values()].filter(notComp));
 }
 
 /* ================= 雲端同步（Supabase） ================= */
@@ -464,7 +464,10 @@ function remember(list) { list.forEach(a => { const k = albumKey(a); const old =
 const findAlbum = k => db.albums[k] || seen.get(k);
 const typeLabel = t => ({ Album: '專輯', EP: 'EP', Single: '單曲', Compilation: '合輯' })[t] || t;
 // 跟 Spotify 一樣的發行類型分組
-const RELEASES = [['Album', '專輯'], ['SingleEP', '單曲和迷你專輯'], ['Compilation', '合輯']];
+// 整個 App 都不算「參與的專輯」和「合輯」（使用者規則）
+const RELEASES = [['Album', '專輯'], ['SingleEP', '單曲和迷你專輯']];
+const notComp = a => a && a.type !== 'Compilation';
+const myAlbums = () => Object.values(db.albums).filter(notComp);
 const inGroup = (a, g) => !g ? true : g === 'Album' ? a.type === 'Album' : g === 'SingleEP' ? (a.type === 'Single' || a.type === 'EP') : g === 'Compilation' ? a.type === 'Compilation' : true;
 // Spotify 式單選標籤：選了一個就只留「✕＋已選的」，再點一次或按 ✕ 取消回到全部
 function chipBar(scope, opts, sel, style = '') {
@@ -494,7 +497,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v29';
+const APP_VER = 'v30';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -765,7 +768,7 @@ async function doSearch(q) {
   state.results = { albums: al.status === 'fulfilled' ? al.value : [], artists,
     err: al.status === 'rejected' && ar.status === 'rejected' ? (al.reason?.message || '連線失敗') : '' };
   updateSearchBody();
-  // 搜到歌手時，把他的專輯、單曲和迷你專輯、合輯全部列出來
+  // 搜到歌手時，把他的專輯、單曲和迷你專輯全部列出來
   const top = artists[0];
   if (top?.id) {
     state.results.discFor = top.id; state.results.discLoading = true; updateSearchBody();
@@ -778,7 +781,7 @@ async function doSearch(q) {
 /* ---------- 已聽過 ---------- */
 function renderLib(app) {
   const status = state.tab;
-  let list = Object.values(db.albums).filter(a => a.status === status);
+  let list = myAlbums().filter(a => a.status === status);
   const total = list.length, artists = new Set(list.map(a => norm(a.artist))).size;
   if (state.libFilter) list = list.filter(a => inGroup(a, state.libFilter));
   if (state.libQ) { const q = state.libQ.toLowerCase(); list = list.filter(a => (a.title + ' ' + a.artist).toLowerCase().includes(q)); }
@@ -856,13 +859,13 @@ function openSortMenu() {
 
 /* ---------- 封存 ---------- */
 function renderArchive(app) {
-  const list = remember(Object.values(db.albums).filter(a => a.status === 'archived').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+  const list = remember(myAlbums().filter(a => a.status === 'archived').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
   app.innerHTML = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>
     <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div></header>
     ${list.length ? `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`
       : '<div class="empty">沒有封存的唱片</div>'}`;
 }
-const archiveCount = () => Object.values(db.albums).filter(a => a.status === 'archived').length;
+const archiveCount = () => myAlbums().filter(a => a.status === 'archived').length;
 
 /* ---------- 歌手 ---------- */
 // 刪除歌手＝移除這位歌手所有的標記（已聽過／封存），會同步到雲端
@@ -1031,7 +1034,8 @@ function switchTab(t) {
   document.addEventListener('touchcancel', end);
 })();
 /* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
-const AT_KEY = 'heard.artistTotals', AT_TTL = 3 * 864e5;
+try { localStorage.removeItem('heard.artistTotals'); } catch (e) {}
+const AT_KEY = 'heard.artistTotals2', AT_TTL = 3 * 864e5;
 const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
@@ -1045,7 +1049,7 @@ function rowArtistId(name) {
   return id;
 }
 function statsFor(name, discKeys) {
-  const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
+  const local = myAlbums().filter(a => norm(a.artist) === norm(name));
   const all = new Set([...discKeys, ...local.map(albumKey)]);
   const heard = [...all].filter(k => isDone(statusOf(k))).length;
   return { heard, total: all.size, pct: all.size ? Math.round(heard / all.size * 100) : 0 };
@@ -1089,7 +1093,7 @@ async function pumpArtistTotals() {
 function renderArtists(app) {
   const map = new Map();
   // 規則：封存的專輯不會讓歌手出現在歌手列表（但歌手已在列表時，封存仍算進進度）
-  Object.values(db.albums).filter(a => a.status !== 'archived').forEach(a => {
+  myAlbums().filter(a => a.status !== 'archived').forEach(a => {
     const k = norm(a.artist);
     if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [] });
     const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
@@ -1125,7 +1129,7 @@ function renderArtists(app) {
 async function renderArtist(app) {
   const v = state.view;
   const head = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>`;
-  const local = Object.values(db.albums).filter(a => norm(a.artist) === norm(v.name));
+  const local = myAlbums().filter(a => norm(a.artist) === norm(v.name));
   if (!v.albums) {
     app.innerHTML = `${head}<h2 style="margin:4px 0">${esc(v.name)}</h2><div class="spinner"></div>`;
     const done = list => {
