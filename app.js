@@ -450,6 +450,12 @@ async function syncNow(manual) {
           else if (ts === recentSearchesAt) delete db.dirty[META_RS];
           return;
         }
+        if (r.key === META_FA) {
+          const ts = Number(r.updated_at);
+          if (ts > followedAt) { applyRemoteFollowed(r.data?.items, ts); delete db.dirty[META_FA]; }
+          else if (ts === followedAt) delete db.dirty[META_FA];
+          return;
+        }
         if (r.key.startsWith('__meta:')) return;
         const k = r.key, localTs = db.albums[k]?.updatedAt ?? db.deleted[k] ?? 0, ts = Number(r.updated_at);
         if (ts > localTs) {
@@ -464,6 +470,8 @@ async function syncNow(manual) {
     // 2. 推上本機有改過的
     const rows = Object.keys(db.dirty).map(k => k === META_RS
       ? { user_id: sbUser.id, key: k, data: { items: recentSearches }, deleted: false, updated_at: recentSearchesAt || Date.now() }
+      : k === META_FA
+      ? { user_id: sbUser.id, key: k, data: { items: followed }, deleted: false, updated_at: followedAt || Date.now() }
       : db.albums[k]
       ? { user_id: sbUser.id, key: k, data: db.albums[k], deleted: false, updated_at: db.albums[k].updatedAt || Date.now() }
       : { user_id: sbUser.id, key: k, data: {}, deleted: true, updated_at: db.deleted[k] || Date.now() });
@@ -516,6 +524,7 @@ const I = {
   markOn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12v17l-6-4-6 4z"/></svg>',
   search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
   gear: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  archiveOn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.2"/><path d="M5 9v10.5a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V9z"/><path d="M10 13.5h4" stroke="#fff"/></svg>',
   archive: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.2"/><path d="M5 9v10.5a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V9M10 13.5h4"/></svg>',
   sort: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>',
   flip: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>',
@@ -529,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v40';
+const APP_VER = 'v41';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -643,6 +652,25 @@ function saveRecentSearches() {
 function applyRemoteRecentSearches(items, ts) {
   recentSearches = Array.isArray(items) ? items.slice(0, RS_MAX) : []; recentSearchesAt = ts;
   try { localStorage.setItem(RS_KEY, JSON.stringify(recentSearches)); localStorage.setItem(RS_AT, String(ts)); } catch (e) {}
+}
+// 加入的歌手：不用標記專輯也能出現在歌手列表；跨裝置同步（key = META_FA）
+const FA_KEY = 'heard.followed', FA_AT = 'heard.followedAt', META_FA = '__meta:followedArtists';
+let followed = (() => { try { return JSON.parse(localStorage.getItem(FA_KEY)) || []; } catch (e) { return []; } })();
+let followedAt = +(localStorage.getItem(FA_AT) || 0);
+const isFollowed = name => followed.some(x => norm(x.name) === norm(name));
+function saveFollowed() {
+  followedAt = Date.now();
+  try { localStorage.setItem(FA_KEY, JSON.stringify(followed)); localStorage.setItem(FA_AT, String(followedAt)); } catch (e) {}
+  db.dirty[META_FA] = 1; save(); scheduleSync();
+}
+function applyRemoteFollowed(items, ts) {
+  followed = Array.isArray(items) ? items : []; followedAt = ts;
+  try { localStorage.setItem(FA_KEY, JSON.stringify(followed)); localStorage.setItem(FA_AT, String(ts)); } catch (e) {}
+}
+function setFollow(name, id, on) {
+  followed = followed.filter(x => norm(x.name) !== norm(name));
+  if (on) followed.unshift({ name, id: id || '', at: Date.now() });
+  saveFollowed();
 }
 function addRecentSearch(item) {
   const id = item.type + ':' + (item.type === 'album' ? item.key : norm(item.name));
@@ -903,7 +931,12 @@ const archiveCount = () => myAlbums().filter(a => a.status === 'archived').lengt
 // 刪除歌手＝移除這位歌手所有的標記（已聽過／封存），會同步到雲端
 async function deleteArtist(name) {
   const albums = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
-  if (!albums.length) return;
+  if (!albums.length) {
+    if (!isFollowed(name)) return;
+    const ok = await ask({ title: `移除「${name}」？`, msg: '會從歌手列表移除這位歌手。', ok: '移除', cancel: '取消' });
+    if (!ok) { closeSwipes(); return; }
+    setFollow(name, '', false); render(); return toast(`已移除「${name}」`);
+  }
   const n = st => albums.filter(a => a.status === st).length;
   const parts = [['heard', '已聽過'], ['archived', '封存']].filter(([st]) => n(st)).map(([st, l]) => `${l} ${n(st)}`);
   const ok = await ask({
@@ -914,6 +947,7 @@ async function deleteArtist(name) {
   if (!ok) { closeSwipes(); return; }
   const now = Date.now();
   albums.forEach(a => { const k = albumKey(a); delete db.albums[k]; db.deleted[k] = now; db.dirty[k] = 1; });
+  if (isFollowed(name)) setFollow(name, '', false);
   delete artistTotals[norm(name)];
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
   save(); scheduleSync();
@@ -1134,6 +1168,7 @@ function renderArtists(app) {
     const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
     g.heard.push(a);
   });
+  followed.forEach(f => { const k = norm(f.name); if (!map.has(k)) map.set(k, { id: f.id || '', name: f.name, heard: [] }); else if (!map.get(k).id && f.id) map.get(k).id = f.id; });
   const all = [...map.values()];
   all.forEach(x => { x.pg = artistProgress(x.name); });
   const hideDone = (() => { try { return localStorage.getItem('heard.hideDoneArtists') === '1'; } catch (e) { return false; } })();
@@ -1148,7 +1183,7 @@ function renderArtists(app) {
     </div>` : ''}
     ${all.length ? `<div class="chips" style="margin-bottom:4px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
     ${list.length ? `<div class="list">${list.map(x => {
-      const c = artistTotals[norm(x.name)]?.img || x.heard[0].cover;
+      const c = artistTotals[norm(x.name)]?.img || x.heard[0]?.cover || '';
       const pg = x.pg;
       const ce = artistTotals[norm(x.name)];
       if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
@@ -1230,6 +1265,8 @@ async function renderArtist(app) {
       <div style="flex:1;min-width:0"><h2>${esc(v.name)}</h2>
         <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張</span><b style="font-size:18px">${pct}%</b></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
+        ${(() => { const inList = isFollowed(v.name) || local.some(a => a.status !== 'archived');
+          return `<button class="follow-btn${inList ? ' on' : ''}" data-act="follow">${inList ? '已加入' : '加入'}</button>`; })()}
       </div>
     </div>
     ${chipBar('artist', ARTIST_OPTS, v.filter || null, 'margin-bottom:4px').replace('">', `"><button class="chip${v.unheard ? ' on' : ''}" data-act="unheardToggle">未聽過</button>`)}
@@ -1346,8 +1383,8 @@ function renderSheet() {
     <div class="by"><button data-artist="${a.artistId || ''}" data-name="${esc(a.artist)}" style="color:inherit;font-weight:inherit">${esc(a.artist)} ›</button></div>
     <div class="meta" id="sheetMeta">${metaHTML(a, tracks)}</div>
     <div class="two">
-      <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${I.archive} 封存</button>
-      <button class="big-btn ${st === 'heard' ? 'heard' : 'solid'}" data-heard="${esc(k)}">${I.check} ${st === 'heard' ? '已聽過' : '標記已聽過'}</button>
+      <button class="big-btn ${st === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}">${st === 'archived' ? I.archiveOn : I.archive} ${st === 'archived' ? '已封存' : '封存'}</button>
+      <button class="big-btn ${st === 'heard' ? 'heard' : st === 'archived' ? '' : 'solid'}" data-heard="${esc(k)}">${I.check} ${st === 'heard' ? '已聽過' : '標記已聽過'}</button>
     </div>
     <div class="tracks${tracks?.length ? ' in' : ''}" id="sheetTracks">${tracksHTML(tracks)}</div>
   </div>`;
@@ -1405,6 +1442,7 @@ function openMenu() {
     sbUser = data.user; state.login = {};
     Object.keys(db.albums).forEach(k => db.dirty[k] = 1); // 第一次登入：把本機全部推上去
     if (recentSearchesAt) db.dirty[META_RS] = 1;
+    if (followedAt) db.dirty[META_FA] = 1;
     Object.keys(db.deleted).forEach(k => db.dirty[k] = 1);
     save(); toast('✓ 已登入，開始同步'); openMenu(); await syncNow(); if ($('#sheet').classList.contains('show')) openMenu();
   };
@@ -1508,6 +1546,16 @@ document.addEventListener('click', async e => {
       return;
     }
     case 'hideDone': { let on = false; try { on = localStorage.getItem('heard.hideDoneArtists') === '1'; localStorage.setItem('heard.hideDoneArtists', on ? '0' : '1'); } catch (e) {} return render(); }
+    case 'follow': {
+      const v = state.view; if (!v) return;
+      const hasMarks = myAlbums().some(a => norm(a.artist) === norm(v.name) && a.status !== 'archived');
+      if (isFollowed(v.name)) {
+        setFollow(v.name, v.id, false);
+        toast(hasMarks ? '已取消加入（有標記專輯，仍會留在歌手列表）' : `已從歌手列表移除「${v.name}」`);
+      } else if (hasMarks) return toast('這位歌手已經在歌手列表');
+      else { setFollow(v.name, isSpId(v.id) ? v.id : '', true); toast(`已加入「${v.name}」`); }
+      return render();
+    }
     case 'unheardToggle': if (state.view) { state.view.unheard = !state.view.unheard; saveArtistFilter(state.view); } return render();
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();

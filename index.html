@@ -118,7 +118,10 @@ html.scrolled .search-row::after,html.scrolled .backbar::after{opacity:1}
 .mini.want{background:var(--want);border-color:var(--want);color:#06142e}
 .mini.arch{background:#c9ccd1;border-color:#c9ccd1;color:#1a1b1e}
 .arow .mini.arch{background:#c9ccd1;border-color:#c9ccd1}
-.big-btn.arch{background:#c9ccd1;color:#1a1b1e}
+.big-btn.arch{background:#fff;color:#111;box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(255,255,255,.18)}
+.follow-btn{margin-top:10px;height:30px;padding:0 16px;border-radius:999px;border:1px solid #8a8a8f;color:var(--fg);font-size:13px;font-weight:700;background:none}
+.follow-btn.on{border-color:var(--accent);color:var(--accent)}
+.follow-btn:active{transform:scale(.96)}
 .lbl.arch{color:#a6aab0}
 /* 封存：封面變淡（按鈕維持清楚） */
 .is-arch .cover img,.is-arch .arow-cover img,.is-arch .srow-img img,.detail-cover.is-arch img{opacity:.2;filter:grayscale(1);transition:opacity .2s,filter .2s}
