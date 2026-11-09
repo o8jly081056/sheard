@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v43';
+const APP_VER = 'v44';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -609,7 +609,8 @@ function albumRow(a, no) {
   </div>`;
 }
 const VIEWS = [['grid', '大圖示'], ['small', '小圖示'], ['list', '列表']];
-function viewOf(st) { db.settings.view ??= {}; return db.settings.view[st] || 'grid'; }
+function viewOf(st) { db.settings.view ??= {}; return db.settings.view[st] || 'list'; }
+const viewBtn = (st, extra = '') => { const l = viewOf(st) === 'list'; return `<button class="icon-btn" data-act="viewToggle" data-st="${st}" aria-label="${l ? '圖示' : '列表'}"${extra}>${l ? I.v_grid : I.v_list}</button>`; };
 
 /* ---------- 首頁（搜尋＋最近播放） ---------- */
 // 搜尋結果區塊（只更新這塊，打字時輸入框不會被重畫、鍵盤也不會收起）
@@ -855,10 +856,11 @@ function renderLib(app) {
     ${chipBar('lib', RELEASES, state.libFilter)}
     <div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label(status)}</span></button>
-      <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
+      <div style="display:flex;gap:6px">${viewBtn(status, ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
     </div>
     ${!list.length ? '<div class="empty">沒有符合的唱片</div>'
-      : `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`}`
+      : viewOf(status) === 'list' ? `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`
+      : `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`}`
     : `<div class="empty"><b>還沒有已聽過的唱片</b>到「首頁」找專輯，點 <span class="inline-ic">${I.check}</span> 標記已聽過</div>`}
     ${isH && archiveCount() ? `<button class="archive-link" data-act="archive">${I.archive}已封存 ${archiveCount()} 張 ›</button>` : ''}`;
   const lq = $('#lq'); if (lq) lq.oninput = e => { state.libQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#lq'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -922,7 +924,7 @@ function renderArchive(app) {
   const list = remember(myAlbums().filter(a => a.status === 'archived').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
   const asList = viewOf('archive') === 'list';
   app.innerHTML = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>
-    <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div>${list.length ? `<button class="icon-btn" data-act="archView" aria-label="${asList ? '圖示' : '列表'}">${asList ? I.v_grid : I.v_list}</button>` : ''}</header>
+    <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div>${list.length ? viewBtn('archive') : ''}</header>
     ${list.length ? (asList ? `<div class="alist">${list.map(a => albumRow(a)).join('')}</div>` : `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`)
       : '<div class="empty">沒有封存的唱片</div>'}`;
 }
@@ -1180,7 +1182,7 @@ function renderArtists(app) {
     <header class="top"><div><h1>歌手</h1>${all.length ? `<div class="sub">${all.length} 位歌手</div>` : ''}</div>${gearBtn()}</header>
     ${all.length ? `<div class="row-between" style="margin-bottom:6px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
-      <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
+      <div style="display:flex;gap:6px">${viewBtn(status, ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
     </div>` : ''}
     ${all.length ? `<div class="chips" style="margin-bottom:4px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
     ${list.length ? `<div class="list">${list.map(x => {
@@ -1561,7 +1563,7 @@ document.addEventListener('click', async e => {
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
-    case 'archView': db.settings.view ??= {}; db.settings.view.archive = viewOf('archive') === 'list' ? 'grid' : 'list'; save(); return render();
+    case 'viewToggle': { const st = d.st; db.settings.view ??= {}; db.settings.view[st] = viewOf(st) === 'list' ? 'grid' : 'list'; save(); return render(); }
     case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
     case 'sortMenu': return openSortMenu();
     case 'sortFlip': { const c = sortOf(state.tab); db.settings.sort[state.tab] = { key: c.key, desc: !c.desc }; save(); return render(); }
