@@ -220,7 +220,7 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
         if (onPage) onPage(finish());
         if (net) await sleep(350);
       }
-      if (!apiErr && out.length) return finish();   // 端點回傳空的也改用搜尋
+      if (!apiErr && out.length) return Object.assign(finish(), { src: 'api' });   // 完整清單；回傳空的才改用搜尋
     }
     if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
     // 備援：搜尋。歌手作品端點被擋時改用搜尋拼出完整作品：
@@ -253,7 +253,7 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
     }
     if (!out.length && (searchErr || apiErr)) throw searchErr || apiErr;
     if (searchErr && /限制|上限/.test(searchErr.message)) return finish(searchErr);
-    return finish();
+    return Object.assign(finish(), { src: 'search' });
   } finally { discBusy--; }
 }
 async function resolveArtistId(name) {
@@ -505,7 +505,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v37';
+const APP_VER = 'v38';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1043,11 +1043,14 @@ function switchTab(t) {
 })();
 /* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
 try { localStorage.removeItem('heard.artistTotals'); } catch (e) {}
-const AT_KEY = 'heard.artistTotals2', AT_TTL = 3 * 864e5;
+try { localStorage.removeItem('heard.artistTotals2'); } catch (e) {}
+const AT_KEY = 'heard.artistTotals3', AT_TTL = 3 * 864e5;
+// 用搜尋拼湊的進度可能不完整，6 小時後就重新用完整清單算
+const atStale = c => !c || Date.now() - c.at > (c.src === 'search' ? 6 * 36e5 : AT_TTL);
 const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
-  artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now(), img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
+  artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now(), src: albums.src || 'api', img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
 }
 // 歌手列表與歌手頁共用：同一位歌手用同一個 Spotify id、同一套算法，數字才會一致
@@ -1069,13 +1072,13 @@ function artistProgress(name) {
 const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0;
 function queueArtistTotal(name, id) {
   const c = artistTotals[norm(name)];
-  if (!spOn() || atQueue.has(name) || (c && Date.now() - c.at < AT_TTL && c.img !== undefined)) return;
+  if (!spOn() || atQueue.has(name) || (c && !atStale(c) && c.img !== undefined)) return;
   atQueue.add(name); pumpArtistTotals(id);
 }
 async function pumpArtistTotals() {
   const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
   if (cw) { setTimeout(pumpArtistTotals, cw * 1000 + 500); return; }
-  if (atDone >= 8) return;
+  if (atDone >= 15) return;
   if (discBusy) { setTimeout(pumpArtistTotals, 4000); return; }
   while (atRunning < 1 && atQueue.size) {
     atDone++;
@@ -1124,7 +1127,7 @@ function renderArtists(app) {
       const c = artistTotals[norm(x.name)]?.img || x.heard[0].cover;
       const pg = x.pg;
       const ce = artistTotals[norm(x.name)];
-      if (!pg || Date.now() - ce.at > AT_TTL || ce.img === undefined) queueArtistTotal(x.name);
+      if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
       return `<div class="sw">
         <button class="sw-del" data-delartist="${esc(x.name)}">刪除</button>
         <button class="li sw-fg" data-artist="${x.id}" data-name="${esc(x.name)}">
