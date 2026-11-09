@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v46';
+const APP_VER = 'v47';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -851,8 +851,8 @@ function renderLib(app) {
   remember(list);
   const isH = status === 'heard';
   app.innerHTML = `
-    <header class="top"><div><h1>已聽過</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${gearBtn()}</header>
-    ${total ? `<div class="search">${I.search}<input id="lq" type="search" placeholder="在已聽過裡搜尋" value="${esc(state.libQ)}"></div>
+    <div class="home-head"><header class="top"><div><h1>已聽過</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${gearBtn()}</header></div>
+    ${total ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="lq" type="search" placeholder="在已聽過裡搜尋" value="${esc(state.libQ)}"></div></div>
     ${chipBar('lib', RELEASES, state.libFilter)}
     <div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label(status)}</span></button>
