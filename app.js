@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v48';
+const APP_VER = 'v49';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -892,9 +892,9 @@ const colStroke = { compare(a, b) {
 const timeOf = (a, st) => (st === 'heard' ? a.heardAt : st === 'archived' ? a.updatedAt : a.addedAt) || a.addedAt || 0;
 // 每個排序：cmp 是「遞增」比較；dirs[0] 是遞增的說法、dirs[1] 是遞減；def 為預設是否遞減
 const SORTS = {
-  time:   { label: st => st === 'heard' ? '聽過時間' : st === 'archived' ? '封存時間' : '加入時間', dirs: ['舊 → 新', '新 → 舊'], def: true,  cmp: (a, b, st) => timeOf(a, st) - timeOf(b, st) },
-  title:  { label: () => '專輯名稱', dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.title, b.title) },
-  artist: { label: () => '歌手',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') }
+  time:   { label: () => '最近新增', dirs: ['舊 → 新', '新 → 舊'], def: true,  cmp: (a, b, st) => timeOf(a, st) - timeOf(b, st) },
+  title:  { label: () => '依字母順序', dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.title, b.title) },
+  artist: { label: () => '創作者',   dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') }
 };
 // 歌手頁的排序：筆畫、聽過進度
 const ARTIST_SORTS = {
@@ -915,7 +915,7 @@ function setSort(st, key) {
 function openSortMenu() {
   state.current = null;
   const st = libSt(), cur = sortOf(st);
-  $('#sheet').innerHTML = `<div class="grab"></div><h2 style="margin:0 0 8px">排序方式</h2>
+  $('#sheet').innerHTML = `<div class="grab"></div><h2 style="margin:0 0 8px">排序依據</h2>
     <div class="list">${Object.entries(sortsFor(st)).map(([k, o]) => {
       const on = cur.key === k;
       return `<button class="li sort-opt ${on ? 'on' : ''}" data-sort="${k}">
