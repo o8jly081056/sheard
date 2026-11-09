@@ -15,7 +15,22 @@ const norm = s => (s || '').toLowerCase()
   .replace(/\s*[\(\[](deluxe|remaster|explicit|clean|expanded|anniversary|bonus|special)[^\)\]]*[\)\]]/g, '')
   .replace(/[^\p{L}\p{N}]+/gu, '').trim();
 // 用「歌手名＋專輯名」當作唯一鍵，讓 Spotify、手動新增、以及舊版資料的同一張專輯對得起來
-const albumKey = a => `${norm(a.artist)}|${norm(a.title)}`;
+// 單曲／EP 另外加上「|s」：同名的專輯和單曲（例如專輯「空中飛人」和單曲「空中飛人」）是兩張不同的唱片
+const isSingleType = t => t === 'Single' || t === 'EP';
+const albumKey = a => `${norm(a.artist)}|${norm(a.title)}${isSingleType(a.type) ? '|s' : ''}`;
+// 舊資料的單曲沒有「|s」，搬到新的鍵（雲端也會跟著更新）
+function migrateKeys() {
+  const now = Date.now(); let n = 0;
+  Object.keys(db.albums).forEach(k => {
+    const a = db.albums[k]; if (!a || !a.artist || !a.title) return;
+    const nk = albumKey(a); if (nk === k) return;
+    const cur = db.albums[nk];
+    if (!cur || (cur.updatedAt || 0) < (a.updatedAt || 0)) { db.albums[nk] = { ...a, updatedAt: now }; db.dirty[nk] = 1; }
+    delete db.albums[k]; db.deleted[k] = now; db.dirty[k] = 1; n++;
+  });
+  if (n) save();
+  return n;
+}
 
 const db = load();
 function load() {
@@ -445,6 +460,7 @@ async function syncNow(manual) {
       });
       if (data.length < 1000) break;
     }
+    if (migrateKeys()) metaChanged = true;   // 其他裝置用舊版存的單曲，搬到新的鍵
     // 2. 推上本機有改過的
     const rows = Object.keys(db.dirty).map(k => k === META_RS
       ? { user_id: sbUser.id, key: k, data: { items: recentSearches }, deleted: false, updated_at: recentSearchesAt || Date.now() }
@@ -513,7 +529,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v39';
+const APP_VER = 'v40';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1051,8 +1067,8 @@ function switchTab(t) {
 })();
 /* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
 try { localStorage.removeItem('heard.artistTotals'); } catch (e) {}
-try { localStorage.removeItem('heard.artistTotals2'); } catch (e) {}
-const AT_KEY = 'heard.artistTotals3', AT_TTL = 3 * 864e5;
+try { ['heard.artistTotals2', 'heard.artistTotals3'].forEach(k => localStorage.removeItem(k)); } catch (e) {}
+const AT_KEY = 'heard.artistTotals4', AT_TTL = 3 * 864e5;
 // 用搜尋拼湊的進度可能不完整，6 小時後就重新用完整清單算
 const atStale = c => !c || Date.now() - c.at > (c.src === 'search' ? 6 * 36e5 : AT_TTL);
 const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
@@ -1591,7 +1607,7 @@ async function quickNowPlaying() {
 
 /* ================= 啟動 ================= */
 (async () => {
-  purgeWant(); save();
+  purgeWant(); migrateKeys(); save();
   await spotifyCallback();
   const wantNp = new URLSearchParams(location.search).has('np');
   if (wantNp) history.replaceState(null, '', spRedirect());
