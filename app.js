@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v42';
+const APP_VER = 'v43';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -920,9 +920,10 @@ function openSortMenu() {
 /* ---------- 封存 ---------- */
 function renderArchive(app) {
   const list = remember(myAlbums().filter(a => a.status === 'archived').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+  const asList = viewOf('archive') === 'list';
   app.innerHTML = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>
-    <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div></header>
-    ${list.length ? `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`
+    <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div>${list.length ? `<button class="icon-btn" data-act="archView" aria-label="${asList ? '圖示' : '列表'}">${asList ? I.v_grid : I.v_list}</button>` : ''}</header>
+    ${list.length ? (asList ? `<div class="alist">${list.map(a => albumRow(a)).join('')}</div>` : `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`)
       : '<div class="empty">沒有封存的唱片</div>'}`;
 }
 const archiveCount = () => myAlbums().filter(a => a.status === 'archived').length;
@@ -1560,6 +1561,7 @@ document.addEventListener('click', async e => {
     case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
+    case 'archView': db.settings.view ??= {}; db.settings.view.archive = viewOf('archive') === 'list' ? 'grid' : 'list'; save(); return render();
     case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
     case 'sortMenu': return openSortMenu();
     case 'sortFlip': { const c = sortOf(state.tab); db.settings.sort[state.tab] = { key: c.key, desc: !c.desc }; save(); return render(); }
