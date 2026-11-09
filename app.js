@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v41';
+const APP_VER = 'v42';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1578,6 +1578,27 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { sy
 $('#scrim').onclick = () => closeSheet();
 // 面板打開時，在背景遮罩上滑動不會捲動底下的頁面
 $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+// 專輯列表的點擊：手指放開就直接打開（iPhone 點在文字上有時不會觸發 click）
+(() => {
+  let row = null, x0 = 0, y0 = 0, t0 = 0, moved = false;
+  document.addEventListener('touchstart', e => {
+    row = null;
+    if (e.touches.length > 1) return;
+    const r = e.target.closest('.arow[data-open], .srow[data-open]');
+    if (!r || e.target.closest('button,[data-heard],[data-arch],a,input')) return;
+    row = r; moved = false; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (row && (Math.abs(e.touches[0].clientX - x0) > 8 || Math.abs(e.touches[0].clientY - y0) > 8)) moved = true;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const r = row; row = null;
+    if (!r || moved || Date.now() - t0 > 600 || !document.contains(r)) return;
+    if ($('#sheet').classList.contains('show')) return;
+    e.preventDefault();                       // 不再產生 click，避免打開兩次
+    r.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }, { passive: false });
+})();
 // 面板打開時，後面的頁面不能被捲動：面板內容捲到底（或本來就不用捲）時，擋掉往後面頁面傳的捲動
 (() => {
   let sy = 0;
