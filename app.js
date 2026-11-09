@@ -497,7 +497,7 @@ function updateDot() {
 /* ================= 狀態 ================= */
 const state = {
   tab: 'search', view: null, q: '', mode: 'album', results: null, loading: false,
-  libFilter: null, sf: null, resKind: null, libQ: '', current: null, sp: {}, syncErr: '', login: {}
+  libFilter: null, archFilter: null, archQ: '', sf: null, resKind: null, libQ: '', current: null, sp: {}, syncErr: '', login: {}
 };
 const seen = new Map();
 function remember(list) { list.forEach(a => { const k = albumKey(a); const old = seen.get(k); seen.set(k, old ? { ...old, ...a, _tracks: old._tracks } : a); }); return list; }
@@ -538,22 +538,23 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v47';
+const APP_VER = 'v48';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
   if (!state.view) baseY = y;
   document.documentElement.classList.toggle('scrolled', y > 4);
   // 搜尋欄固定在頂部時，下方顯示漸層遮罩
-  const sr = !state.view && document.querySelector('#app .search-row');
+  const sr = (!state.view || state.view.type === 'archive') && document.querySelector('#app .search-row');
   if (sr) {
     const stickTop = parseFloat(getComputedStyle(sr).top) || 0;
     sr.classList.toggle('stuck', y > 0 && sr.getBoundingClientRect().top <= stickTop + 0.5);
   }
   // 頁面標題往上推出畫面時淡出
-  const hd = !state.view && document.querySelector('#app > .home-head > header.top, #app > header.top');
+  const hd = (!state.view || state.view.type === 'archive') && document.querySelector('#app > .home-head > header.top, #app > header.top');
   if (hd) {
-    const r = hd.getBoundingClientRect(), topLine = parseFloat(getComputedStyle($('#app')).paddingTop) || 0;
+    const bb = $('#app > .backbar');
+    const r = hd.getBoundingClientRect(), topLine = bb ? bb.getBoundingClientRect().bottom : parseFloat(getComputedStyle($('#app')).paddingTop) || 0;
     const p = Math.min(1, Math.max(0, (topLine - r.top) / Math.max(1, r.height)));
     hd.style.opacity = p ? String(1 - p) : '';
   }
@@ -840,30 +841,35 @@ async function doSearch(q) {
 }
 
 /* ---------- 已聽過 ---------- */
-function renderLib(app) {
-  const status = state.tab;
+// 已聽過頁與封存頁共用：各自有搜尋字、篩選、排序、檢視方式
+// 排序設定的對象：封存頁是 'archived'，其他就是目前的 tab
+const libSt = () => state.view?.type === 'archive' ? 'archived' : state.tab;
+const libQ = st => st === 'archived' ? state.archQ : state.libQ;
+const libF = st => st === 'archived' ? state.archFilter : state.libFilter;
+function renderLib(app, status = 'heard') {
+  const isH = status === 'heard', name = isH ? '已聽過' : '已封存';
   let list = myAlbums().filter(a => a.status === status);
   const total = list.length, artists = new Set(list.map(a => norm(a.artist))).size;
-  if (state.libFilter) list = list.filter(a => inGroup(a, state.libFilter));
-  if (state.libQ) { const q = state.libQ.toLowerCase(); list = list.filter(a => (a.title + ' ' + a.artist).toLowerCase().includes(q)); }
+  const lf = libF(status), lqs = libQ(status), vk = isH ? 'heard' : 'archive';
+  if (lf) list = list.filter(a => inGroup(a, lf));
+  if (lqs) { const q = lqs.toLowerCase(); list = list.filter(a => (a.title + ' ' + a.artist).toLowerCase().includes(q)); }
   const so = sortOf(status), sdef = sortsFor(status)[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b, status) || timeOf(a, status) - timeOf(b, status); return so.desc ? -r : r; });
   remember(list);
-  const isH = status === 'heard';
-  app.innerHTML = `
-    <div class="home-head"><header class="top"><div><h1>已聽過</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${gearBtn()}</header></div>
-    ${total ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="lq" type="search" placeholder="在已聽過裡搜尋" value="${esc(state.libQ)}"></div></div>
-    ${chipBar('lib', RELEASES, state.libFilter)}
+  app.innerHTML = `${isH ? '' : `<div class="backbar plain"><button class="back" data-act="back">${I.back}返回</button></div>`}
+    <div class="home-head"><header class="top"><div><h1>${name}</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${isH ? gearBtn() : ''}</header></div>
+    ${total ? `<div class="search-row${isH ? '' : ' under-back'}" style="padding-bottom:10px"><div class="search">${I.search}<input id="lq" type="search" placeholder="在${name}裡搜尋" value="${esc(lqs)}"></div></div>
+    ${chipBar('lib', RELEASES, lf)}
     <div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label(status)}</span></button>
-      <div style="display:flex;gap:6px">${viewBtn(status, ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
+      <div style="display:flex;gap:6px">${viewBtn(vk, ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
     </div>
     ${!list.length ? '<div class="empty">沒有符合的唱片</div>'
-      : viewOf(status) === 'list' ? `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`
+      : viewOf(vk) === 'list' ? `<div class="alist">${list.map((a, i) => albumRow(a, list.length - i)).join('')}</div>`
       : `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`}`
-    : `<div class="empty"><b>還沒有已聽過的唱片</b>到「首頁」找專輯，點 <span class="inline-ic">${I.check}</span> 標記已聽過</div>`}
+    : isH ? `<div class="empty"><b>還沒有已聽過的唱片</b>到「首頁」找專輯，點 <span class="inline-ic">${I.check}</span> 標記已聽過</div>` : '<div class="empty">沒有封存的唱片</div>'}
     ${isH && archiveCount() ? `<button class="archive-link" data-act="archive">${I.archive}已封存 ${archiveCount()} 張 ›</button>` : ''}`;
-  const lq = $('#lq'); if (lq) lq.oninput = e => { state.libQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#lq'); n.focus(); n.setSelectionRange(pos, pos); };
+  const lq = $('#lq'); if (lq) lq.oninput = e => { state[isH ? 'libQ' : 'archQ'] = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#lq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
 
 /* ---------- 排序 ---------- */
@@ -883,10 +889,10 @@ const colStroke = { compare(a, b) {
   }
   return 0;
 } };
-const timeOf = (a, st) => (st === 'heard' ? a.heardAt : a.addedAt) || a.addedAt || 0;
+const timeOf = (a, st) => (st === 'heard' ? a.heardAt : st === 'archived' ? a.updatedAt : a.addedAt) || a.addedAt || 0;
 // 每個排序：cmp 是「遞增」比較；dirs[0] 是遞增的說法、dirs[1] 是遞減；def 為預設是否遞減
 const SORTS = {
-  time:   { label: st => st === 'heard' ? '聽過時間' : '加入時間', dirs: ['舊 → 新', '新 → 舊'], def: true,  cmp: (a, b, st) => timeOf(a, st) - timeOf(b, st) },
+  time:   { label: st => st === 'heard' ? '聽過時間' : st === 'archived' ? '封存時間' : '加入時間', dirs: ['舊 → 新', '新 → 舊'], def: true,  cmp: (a, b, st) => timeOf(a, st) - timeOf(b, st) },
   title:  { label: () => '專輯名稱', dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.title, b.title) },
   artist: { label: () => '歌手',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') }
 };
@@ -908,7 +914,7 @@ function setSort(st, key) {
 }
 function openSortMenu() {
   state.current = null;
-  const st = state.tab, cur = sortOf(st);
+  const st = libSt(), cur = sortOf(st);
   $('#sheet').innerHTML = `<div class="grab"></div><h2 style="margin:0 0 8px">排序方式</h2>
     <div class="list">${Object.entries(sortsFor(st)).map(([k, o]) => {
       const on = cur.key === k;
@@ -920,14 +926,7 @@ function openSortMenu() {
 }
 
 /* ---------- 封存 ---------- */
-function renderArchive(app) {
-  const list = remember(myAlbums().filter(a => a.status === 'archived').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
-  const asList = viewOf('archive') === 'list';
-  app.innerHTML = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>
-    <header class="top"><div><h1>已封存</h1><div class="sub">${list.length} 張唱片</div></div>${list.length ? viewBtn('archive') : ''}</header>
-    ${list.length ? (asList ? `<div class="alist">${list.map(a => albumRow(a)).join('')}</div>` : `<div class="grid small">${list.map(a => albumCard(a)).join('')}</div>`)
-      : '<div class="empty">沒有封存的唱片</div>'}`;
-}
+function renderArchive(app) { renderLib(app, 'archived'); }
 const archiveCount = () => myAlbums().filter(a => a.status === 'archived').length;
 
 /* ---------- 歌手 ---------- */
@@ -1182,7 +1181,7 @@ function renderArtists(app) {
     <header class="top"><div><h1>歌手</h1>${all.length ? `<div class="sub">${all.length} 位歌手</div>` : ''}</div>${gearBtn()}</header>
     ${all.length ? `<div class="row-between" style="margin-bottom:6px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
-      <div style="display:flex;gap:6px">${viewBtn(status, ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
+      <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
     </div>` : ''}
     ${all.length ? `<div class="chips" style="margin-bottom:4px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
     ${list.length ? `<div class="list">${list.map(x => {
@@ -1525,7 +1524,7 @@ document.addEventListener('click', async e => {
   }
   if (d.f) {
     const v = d.v || null;
-    if (d.f === 'lib') state.libFilter = v;
+    if (d.f === 'lib') state[libSt() === 'archived' ? 'archFilter' : 'libFilter'] = v;
     else if (d.f === 'artist') { state.view.filter = v; saveArtistFilter(state.view); }
     else if (d.f === 'search') {
       state.sf = v;
@@ -1535,7 +1534,7 @@ document.addEventListener('click', async e => {
     return render();
   }
   if (d.view) { db.settings.view ??= {}; db.settings.view[state.tab] = d.view; save(); return render(); }
-  if (d.sort) { setSort(state.tab, d.sort); hideSheet(); window.scrollTo(0, 0); return render(); }
+  if (d.sort) { setSort(libSt(), d.sort); hideSheet(); window.scrollTo(0, 0); return render(); }
   switch (d.act) {
     case 'back': return goBack();
     case 'clear': state.results = null; state.q = ''; return render();
@@ -1564,9 +1563,9 @@ document.addEventListener('click', async e => {
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
     case 'viewToggle': { const st = d.st; db.settings.view ??= {}; db.settings.view[st] = viewOf(st) === 'list' ? 'grid' : 'list'; save(); return render(); }
-    case 'archive': hideSheet(); state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
+    case 'archive': hideSheet(); state.archQ = ''; state.archFilter = null; state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
     case 'sortMenu': return openSortMenu();
-    case 'sortFlip': { const c = sortOf(state.tab); db.settings.sort[state.tab] = { key: c.key, desc: !c.desc }; save(); return render(); }
+    case 'sortFlip': { const st = libSt(), c = sortOf(st); db.settings.sort[st] = { key: c.key, desc: !c.desc }; save(); return render(); }
     case 'manual': return openManual();
     case 'export': return exportData();
     case 'import': return $('#importFile').click();
