@@ -1,6 +1,6 @@
 /* SHeard · 唱片書籤 v2
  * 資料：本機 localStorage 為主，登入後與 Supabase 雙向同步（新的修改勝出）
- * 資料來源：全部取自 Spotify（搜尋、歌手作品、曲目、最近播放），一律手動標記
+ * 資料來源：全部取自 Spotify（搜尋、演出者作品、曲目、最近播放），一律手動標記
  */
 const CFG = window.HEARD_CONFIG || {};
 const $ = s => document.querySelector(s);
@@ -14,7 +14,7 @@ const KEY = 'heard.v2';
 const norm = s => (s || '').toLowerCase()
   .replace(/\s*[\(\[](deluxe|remaster|explicit|clean|expanded|anniversary|bonus|special)[^\)\]]*[\)\]]/g, '')
   .replace(/[^\p{L}\p{N}]+/gu, '').trim();
-// 用「歌手名＋專輯名」當作唯一鍵，讓 Spotify、手動新增、以及舊版資料的同一張專輯對得起來
+// 用「演出者名＋專輯名」當作唯一鍵，讓 Spotify、手動新增、以及舊版資料的同一張專輯對得起來
 // 單曲／EP 另外加上「|s」：同名的專輯和單曲（例如專輯「空中飛人」和單曲「空中飛人」）是兩張不同的唱片
 const isSingleType = t => t === 'Single' || t === 'EP';
 const albumKey = a => `${norm(a.artist)}|${norm(a.title)}${isSingleType(a.type) ? '|s' : ''}`;
@@ -133,14 +133,14 @@ async function toggle(k, status) {
 }
 function touch(k) { db.albums[k].updatedAt = Date.now(); db.dirty[k] = 1; save(); scheduleSync(); }
 
-/* ================= Spotify 目錄（搜尋／歌手作品／曲目） ================= */
+/* ================= Spotify 目錄（搜尋／演出者作品／曲目） ================= */
 // 快取：記憶體＋存在手機上（重開 App 也不用重抓），大幅減少對 Spotify 的請求次數
 const cache = new Map();
 const PC_KEY = 'heard.spCache', PC_MAX = 150;
 const pcache = (() => { try { return JSON.parse(localStorage.getItem(PC_KEY)) || {}; } catch (e) { return {}; } })();
 const ttlFor = path => path.startsWith('/search') ? 864e5            // 搜尋：1 天
-  : /^\/artists\/[^/]+\/albums/.test(path) ? 7 * 864e5              // 歌手作品：7 天
-  : /^\/(artists|albums)\//.test(path) ? 30 * 864e5 : 0;            // 歌手資料、專輯曲目：30 天
+  : /^\/artists\/[^/]+\/albums/.test(path) ? 7 * 864e5              // 演出者作品：7 天
+  : /^\/(artists|albums)\//.test(path) ? 30 * 864e5 : 0;            // 演出者資料、專輯曲目：30 天
 const isEmptyResp = j => !j || (Array.isArray(j.items) && !j.items.length) || (j.albums && !(j.albums.items || []).length) || (j.artists && !j.name && !(j.artists.items || []).length);
 Object.keys(pcache).forEach(k => { if (isEmptyResp(pcache[k]?.j)) delete pcache[k]; });
 let pcSaveT = null;
@@ -182,19 +182,19 @@ async function searchArtists(q) {
   const m = new Map(); pages.flatMap(p => p?.artists?.items || []).filter(Boolean).forEach(x => m.set(x.id, x));
   return [...m.values()];
 }
-// 歌手頭貼：直接用 Spotify 上的歌手照片（取中等尺寸約 320px）
+// 演出者頭貼：直接用 Spotify 上的演出者照片（取中等尺寸約 320px）
 async function artistImage(id, name) {
   if (!isSpId(id)) return '';
   let im = [];
   try { im = (await spCached('/artists/' + id))?.images || []; }
   catch (e) {
-    if (!name) throw e;           // 歌手端點被擋時，改從搜尋結果拿照片
+    if (!name) throw e;           // 演出者端點被擋時，改從搜尋結果拿照片
     const j = await spSearch('artist', name);
     im = (j?.artists?.items || []).find(x => x?.id === id)?.images || [];
   }
   return (im.find(x => (x.width || 0) >= 200 && (x.width || 0) <= 400) || im[0] || {}).url || '';
 }
-// 歌手：照 Spotify 的相關度，名稱完全相同的排最前（不再用名稱過濾，中文搜尋英文名的歌手也找得到）
+// 演出者：照 Spotify 的相關度，名稱完全相同的排最前（不再用名稱過濾，中文搜尋英文名的演出者也找得到）
 async function searchArtistsTop(q) {
   const j = await spSearch('artist', q);
   const list = (j?.artists?.items || []).filter(Boolean);
@@ -203,11 +203,11 @@ async function searchArtistsTop(q) {
 }
 const isFresh = path => cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path));
 let discBusy = 0;
-// 抓歌手在 Spotify 上的全部作品（專輯、單曲和迷你專輯；不含參與的專輯與合輯）
+// 抓演出者在 Spotify 上的全部作品（專輯、單曲和迷你專輯；不含參與的專輯與合輯）
 // 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
 // 回傳陣列；沒抓完時陣列帶 incomplete=true 與 err
-// 先用歌手作品端點；被擋或失敗時，改用搜尋 artist:"名字" 找出他的作品（只留演出者裡有他的，等於不含參與的專輯）
-let discStats = [];   // 診斷用：最近幾次抓歌手作品的統計
+// 先用演出者作品端點；被擋或失敗時，改用搜尋 artist:"名字" 找出他的作品（只留演出者裡有他的，等於不含參與的專輯）
+let discStats = [];   // 診斷用：最近幾次抓演出者作品的統計
 function logDisc(st, raw, r, err) {
   const byKey = new Map(); raw.forEach(al => { const a = fromSpotify(al), k = albumKey(a); (byKey.get(k) || byKey.set(k, []).get(k)).push(al.name + '/' + al.album_type); });
   discStats = [{ ...st, src: r.src, raw: raw.length, shown: r.length, err: err ? String(err.message || err).slice(0, 80) : '',
@@ -246,10 +246,10 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
       if (!apiErr && out.length) return logDisc(st, out, Object.assign(finish(), { src: 'api' }), apiErr);   // 完整清單；回傳空的才改用搜尋
     }
     if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
-    // 備援：搜尋。歌手作品端點被擋時改用搜尋拼出完整作品：
+    // 備援：搜尋。演出者作品端點被擋時改用搜尋拼出完整作品：
     // 1. 專輯搜尋（名字、artist:名字）→ 專輯和 EP
     // 2. 歌曲搜尋（artist:名字、名字）→ 從每首歌所屬的唱片補齊單曲（單曲在專輯搜尋裡常排很後面或搜不到）
-    // 只留演出者有這位歌手的，並排除合輯；連續 4 頁都沒有他的作品才停
+    // 只留演出者有這位演出者的，並排除合輯；連續 4 頁都沒有他的作品才停
     let searchErr = null;
     const passes = [['album', name, 400], ['album', `artist:${name}`, 400], ['track', `artist:${name}`, 500], ['track', name, 300]];
     for (const [type, q, cap] of passes) {
@@ -357,7 +357,7 @@ function countOf(j) {
   if (!j) return '無內容';
   const parts = [];
   if (j.albums) parts.push(`專輯 ${j.albums.items?.length ?? 0}/${j.albums.total ?? '?'}`);
-  if (j.artists && !j.name) parts.push(`歌手 ${j.artists.items?.length ?? 0}/${j.artists.total ?? '?'}`);
+  if (j.artists && !j.name) parts.push(`演出者 ${j.artists.items?.length ?? 0}/${j.artists.total ?? '?'}`);
   if (Array.isArray(j.items)) parts.push(`項目 ${j.items.length}/${j.total ?? '?'}`);
   if (j.name) parts.push(j.name);
   return parts.join('、') || '有回應';
@@ -368,7 +368,7 @@ async function sp(path, retry = true) {
 }
 // 被 Spotify 限流時的冷卻：記在手機上（重開 App 不會重置），連續被擋會逐次加長：30 秒 → 2 分 → 8 分 → 30 分 → 1 小時
 const COOL_KEY = 'heard.spCool';
-// Spotify 會只擋某一類端點（例如歌手作品被擋、搜尋和最近播放正常），所以冷卻分開記：artists / search / me / albums
+// Spotify 會只擋某一類端點（例如演出者作品被擋、搜尋和最近播放正常），所以冷卻分開記：artists / search / me / albums
 const bucketOf = path => (path.split(/[/?]/)[1] || '');
 const spCool = (() => { try { const c = JSON.parse(localStorage.getItem(COOL_KEY)) || {}; return c.until !== undefined ? {} : c; } catch (e) { return {}; } })();
 const saveCool = () => { try { localStorage.setItem(COOL_KEY, JSON.stringify(spCool)); } catch (e) {} };
@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v49';
+const APP_VER = 'v50';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -627,7 +627,7 @@ function searchBodyHTML() {
   const disc = remember(r.disc || []);
   const discKeys = new Set(disc.map(albumKey));
   const top = artists[0];
-  // 跟 Spotify 一樣：最相關的歌手在最上面；接著列出他的全部作品，再來是其他符合的專輯與歌手
+  // 跟 Spotify 一樣：最相關的演出者在最上面；接著列出他的全部作品，再來是其他符合的專輯與演出者
   const discHTML = !top ? '' : r.discLoading ? '<div class="spinner sm"></div>'
     : disc.length ? RELEASES.map(([g, l]) => {
         const list = disc.filter(a => inGroup(a, g));
@@ -638,10 +638,10 @@ function searchBodyHTML() {
     ${top ? sRowArtist(top.name, top.id, img(top)) + '</div>' : ''}
     ${discHTML}
     ${others.length ? `${disc.length ? '<div class="s-sub">其他專輯</div>' : ''}${others.map(row).join('')}` : ''}
-    ${artists.slice(1, 4).length ? `<div class="s-sub">其他歌手</div>${artists.slice(1, 4).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}` : ''}
+    ${artists.slice(1, 4).length ? `<div class="s-sub">其他演出者</div>${artists.slice(1, 4).map(x => sRowArtist(x.name, x.id, img(x)) + '</div>').join('')}` : ''}
   </div>`;
 }
-/* ---------- 最近搜尋（像 Spotify：記錄從搜尋結果點開的專輯／歌手，存在這台裝置） ---------- */
+/* ---------- 最近搜尋（像 Spotify：記錄從搜尋結果點開的專輯／演出者，存在這台裝置） ---------- */
 // 跨裝置同步：存在雲端 albums 表的一列特殊資料（key = META_RS），不會被當成專輯
 const RS_KEY = 'heard.recentSearches', RS_AT = 'heard.recentSearchesAt', RS_MAX = 20, META_RS = '__meta:recentSearches';
 let recentSearches = (() => { try { return JSON.parse(localStorage.getItem(RS_KEY)) || []; } catch (e) { return []; } })();
@@ -655,7 +655,7 @@ function applyRemoteRecentSearches(items, ts) {
   recentSearches = Array.isArray(items) ? items.slice(0, RS_MAX) : []; recentSearchesAt = ts;
   try { localStorage.setItem(RS_KEY, JSON.stringify(recentSearches)); localStorage.setItem(RS_AT, String(ts)); } catch (e) {}
 }
-// 加入的歌手：不用標記專輯也能出現在歌手列表；跨裝置同步（key = META_FA）
+// 加入的演出者：不用標記專輯也能出現在演出者列表；跨裝置同步（key = META_FA）
 const FA_KEY = 'heard.followed', FA_AT = 'heard.followedAt', META_FA = '__meta:followedArtists';
 let followed = (() => { try { return JSON.parse(localStorage.getItem(FA_KEY)) || []; } catch (e) { return []; } })();
 let followedAt = +(localStorage.getItem(FA_AT) || 0);
@@ -689,7 +689,7 @@ function sRowAlbum(a, k, extra = '') {
 function sRowArtist(name, id, img, extra = '') {
   return `<div class="srow" data-artist="${esc(id || '')}" data-name="${esc(name)}"${extra}>
     <div class="srow-img round">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : `<span>${esc(name[0])}</span>`}</div>
-    <div class="srow-txt"><div class="srow-t">${esc(name)}</div><div class="srow-s">歌手</div></div>`;
+    <div class="srow-txt"><div class="srow-t">${esc(name)}</div><div class="srow-s">演出者</div></div>`;
 }
 const albumActs = k => { const s = statusOf(k); return `<div class="srow-acts">
   ${s !== 'heard' ? `<button class="mini ${s === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}" aria-label="封存">${I.archive}</button>` : ''}
@@ -791,7 +791,7 @@ function exitSearchMode() {
 
 function homeHTML() {
   if (!spOn()) return `<div class="panel" style="text-align:center;margin-top:8px">
-      <b>連結 Spotify</b><div class="muted small" style="margin:4px 0 12px">搜尋、歌手作品和最近播放都來自 Spotify，連結後才能使用</div>
+      <b>連結 Spotify</b><div class="muted small" style="margin:4px 0 12px">搜尋、演出者作品和最近播放都來自 Spotify，連結後才能使用</div>
       <button class="btn primary" data-act="spLogin">連結 Spotify</button></div>`;
   const s = state.sp;
   const sec = (title, inner, extra = '') => `<div class="section-h"><span>${title}</span>${extra}</div>${inner}`;
@@ -830,7 +830,7 @@ async function doSearch(q) {
   state.results = { albums: al.status === 'fulfilled' ? al.value : [], artists,
     err: al.status === 'rejected' && ar.status === 'rejected' ? (al.reason?.message || '連線失敗') : '' };
   updateSearchBody();
-  // 搜到歌手時，把他的專輯、單曲和迷你專輯全部列出來
+  // 搜到演出者時，把他的專輯、單曲和迷你專輯全部列出來
   const top = artists[0];
   if (top?.id) {
     state.results.discFor = top.id; state.results.discLoading = true; updateSearchBody();
@@ -857,7 +857,7 @@ function renderLib(app, status = 'heard') {
   list.sort((a, b) => { const r = sdef.cmp(a, b, status) || timeOf(a, status) - timeOf(b, status); return so.desc ? -r : r; });
   remember(list);
   app.innerHTML = `${isH ? '' : `<div class="backbar plain"><button class="back" data-act="back">${I.back}返回</button></div>`}
-    <div class="home-head"><header class="top"><div><h1>${name}</h1><div class="sub">${total} 張唱片 · ${artists} 位歌手</div></div>${isH ? gearBtn() : ''}</header></div>
+    <div class="home-head"><header class="top"><div><h1>${name}</h1><div class="sub">${total} 張唱片 · ${artists} 位演出者</div></div>${isH ? gearBtn() : ''}</header></div>
     ${total ? `<div class="search-row${isH ? '' : ' under-back'}" style="padding-bottom:10px"><div class="search">${I.search}<input id="lq" type="search" placeholder="在${name}裡搜尋" value="${esc(lqs)}"></div></div>
     ${chipBar('lib', RELEASES, lf)}
     <div class="row-between" style="margin-bottom:12px">
@@ -894,9 +894,9 @@ const timeOf = (a, st) => (st === 'heard' ? a.heardAt : st === 'archived' ? a.up
 const SORTS = {
   time:   { label: () => '最近新增', dirs: ['舊 → 新', '新 → 舊'], def: true,  cmp: (a, b, st) => timeOf(a, st) - timeOf(b, st) },
   title:  { label: () => '依字母順序', dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.title, b.title) },
-  artist: { label: () => '創作者',   dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') }
+  artist: { label: () => '演出者',   dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') }
 };
-// 歌手頁的排序：筆畫、聽過進度
+// 演出者頁的排序：筆畫、聽過進度
 const ARTIST_SORTS = {
   pct:  { label: () => '聽過進度', dirs: ['低 → 高', '高 → 低'], def: true,  cmp: (a, b) => (a.pg ? a.pg.pct : -1) - (b.pg ? b.pg.pct : -1) || (a.pg?.heard || a.heard.length) - (b.pg?.heard || b.heard.length) },
   name: { label: () => '筆畫',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.name, b.name) }
@@ -929,13 +929,13 @@ function openSortMenu() {
 function renderArchive(app) { renderLib(app, 'archived'); }
 const archiveCount = () => myAlbums().filter(a => a.status === 'archived').length;
 
-/* ---------- 歌手 ---------- */
-// 刪除歌手＝移除這位歌手所有的標記（已聽過／封存），會同步到雲端
+/* ---------- 演出者 ---------- */
+// 刪除演出者＝移除這位演出者所有的標記（已聽過／封存），會同步到雲端
 async function deleteArtist(name) {
   const albums = Object.values(db.albums).filter(a => norm(a.artist) === norm(name));
   if (!albums.length) {
     if (!isFollowed(name)) return;
-    const ok = await ask({ title: `移除「${name}」？`, msg: '會從歌手列表移除這位歌手。', ok: '移除', cancel: '取消' });
+    const ok = await ask({ title: `移除「${name}」？`, msg: '會從演出者列表移除這位演出者。', ok: '移除', cancel: '取消' });
     if (!ok) { closeSwipes(); return; }
     setFollow(name, '', false); render(); return toast(`已移除「${name}」`);
   }
@@ -943,7 +943,7 @@ async function deleteArtist(name) {
   const parts = [['heard', '已聽過'], ['archived', '封存']].filter(([st]) => n(st)).map(([st, l]) => `${l} ${n(st)}`);
   const ok = await ask({
     title: `刪除「${name}」？`,
-    msg: `會移除這位歌手全部 ${albums.length} 張的標記（${parts.join('、')}），無法復原。`,
+    msg: `會移除這位演出者全部 ${albums.length} 張的標記（${parts.join('、')}），無法復原。`,
     ok: '刪除', cancel: '取消'
   });
   if (!ok) { closeSwipes(); return; }
@@ -995,9 +995,9 @@ function switchTab(t) {
   state.tab = t; state.view = null; window.scrollTo(0, 0); render();
 }
 // 左右滑手勢（整個畫面都能滑，不限邊緣）：
-// - 在歌手頁／封存頁：往右滑返回上一頁，頁面跟著手指，底下露出上一頁
-// - 在首頁／歌手／已聽過：往左滑到下一個分頁、往右滑到上一個分頁
-// - 歌手列表的列上往左滑仍是「刪除」；可以左右捲動的區塊不觸發
+// - 在演出者頁／封存頁：往右滑返回上一頁，頁面跟著手指，底下露出上一頁
+// - 在首頁／演出者／已聽過：往左滑到下一個分頁、往右滑到上一個分頁
+// - 演出者列表的列上往左滑仍是「刪除」；可以左右捲動的區塊不觸發
 (() => {
   let tok = 0, on = false, busy = false, mode = null, kind = '', x0 = 0, y0 = 0, dx = 0, lastX = 0, lastT = 0, vx = 0, under = null, startRow = null;
   const app = () => $('#app');
@@ -1058,7 +1058,7 @@ function switchTab(t) {
       if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
       if (Math.abs(mx) < Math.abs(my) * 1.2) { on = false; return; }   // 上下捲動
       if (kind === 'back' && mx < 0) { on = false; return; }
-      // 歌手列表的列：往左滑交給刪除；已打開的列往右滑是收起
+      // 演出者列表的列：往左滑交給刪除；已打開的列往右滑是收起
       if (startRow && (mx < 0 || startRow.classList.contains('open'))) { on = false; return; }
       mode = 'x'; busy = true;
       if (kind === 'back') makeUnder();
@@ -1101,7 +1101,7 @@ function switchTab(t) {
   document.addEventListener('touchend', end);
   document.addEventListener('touchcancel', end);
 })();
-/* 歌手完整作品數的快取（只存在這台裝置），讓歌手列表不用點進去就能看到聽過百分比 */
+/* 演出者完整作品數的快取（只存在這台裝置），讓演出者列表不用點進去就能看到聽過百分比 */
 try { localStorage.removeItem('heard.artistTotals'); } catch (e) {}
 try { ['heard.artistTotals2', 'heard.artistTotals3'].forEach(k => localStorage.removeItem(k)); } catch (e) {}
 const AT_KEY = 'heard.artistTotals4', AT_TTL = 3 * 864e5;
@@ -1113,7 +1113,7 @@ function setArtistTotal(name, id, albums, img) {
   artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now(), src: albums.src || 'api', img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
 }
-// 歌手列表與歌手頁共用：同一位歌手用同一個 Spotify id、同一套算法，數字才會一致
+// 演出者列表與演出者頁共用：同一位演出者用同一個 Spotify id、同一套算法，數字才會一致
 function rowArtistId(name) {
   let id = '';
   Object.values(db.albums).forEach(a => { if (norm(a.artist) === norm(name) && a.artistId) id = a.artistId; });
@@ -1150,7 +1150,7 @@ async function pumpArtistTotals() {
         const id = isSpId(rid) ? rid : await resolveArtistId(name);
         const albums = id ? await artistAlbums(id, name) : null;
         const img = id ? await artistImage(id, name).catch(() => '') : '';
-        // 如果這段時間使用者已經點進歌手頁更新過，就不要覆蓋
+        // 如果這段時間使用者已經點進演出者頁更新過，就不要覆蓋
         if (albums?.length && !albums.incomplete && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
       } catch (e) {}
       atRunning--;
@@ -1163,7 +1163,7 @@ async function pumpArtistTotals() {
 
 function renderArtists(app) {
   const map = new Map();
-  // 規則：封存的專輯不會讓歌手出現在歌手列表（但歌手已在列表時，封存仍算進進度）
+  // 規則：封存的專輯不會讓演出者出現在演出者列表（但演出者已在列表時，封存仍算進進度）
   myAlbums().filter(a => a.status !== 'archived').forEach(a => {
     const k = norm(a.artist);
     if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [] });
@@ -1178,7 +1178,7 @@ function renderArtists(app) {
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
   app.innerHTML = `
-    <header class="top"><div><h1>歌手</h1>${all.length ? `<div class="sub">${all.length} 位歌手</div>` : ''}</div>${gearBtn()}</header>
+    <header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者</div>` : ''}</div>${gearBtn()}</header>
     ${all.length ? `<div class="row-between" style="margin-bottom:6px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
       <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
@@ -1198,10 +1198,10 @@ function renderArtists(app) {
           ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
         <span class="muted">›</span></button></div>`;
     }).join('')}</div>`
-    : all.length ? '<div class="empty">所有歌手都聽完了</div>' : `<div class="empty"><b>還沒有歌手</b>標記第一張專輯後，歌手會出現在這裡</div>`}`;
+    : all.length ? '<div class="empty">所有演出者都聽完了</div>' : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
 }
 
-// 歌手頁的篩選標籤（未聽過、作品類型）所有歌手共用；存在手機上，關掉 App、結束背景後仍會記住
+// 演出者頁的篩選標籤（未聽過、作品類型）所有演出者共用；存在手機上，關掉 App、結束背景後仍會記住
 const AF_KEY = 'heard.artistFilter';
 const loadArtistFilter = () => { try { return JSON.parse(localStorage.getItem(AF_KEY)) || {}; } catch (e) { return {}; } };
 function saveArtistFilter(v) { try { localStorage.setItem(AF_KEY, JSON.stringify({ filter: v.filter || null, unheard: !!v.unheard })); } catch (e) {} }
@@ -1256,7 +1256,7 @@ async function renderArtist(app) {
   const all = own.filter(a => inGroup(a, v.filter));
   const groups = v.filter ? [[v.filter, ARTIST_OPTS.find(o => o[0] === v.filter)[1]]] : RELEASES;
   const counted = all;
-  // 沒有篩選時直接用共用算法（跟歌手列表一致）；有篩選時算該分類
+  // 沒有篩選時直接用共用算法（跟演出者列表一致）；有篩選時算該分類
   const heard = v.filter ? counted.filter(a => isDone(statusOf(albumKey(a)))).length : st.heard;
   const totalN = v.filter ? counted.length : st.total;
   const pct = totalN ? Math.round(heard / totalN * 100) : 0;
@@ -1421,7 +1421,7 @@ function openMenu() {
     <div class="menu-h">SPOTIFY</div>${spBlock}
     <div class="menu-h">資料</div>
     <div class="list">
-      <button class="li" data-act="archive"><div class="grow"><div class="name">已封存的唱片</div><div class="muted small">${archiveCount()} 張 · 封存的唱片在歌手進度中算作已聽過</div></div></button>
+      <button class="li" data-act="archive"><div class="grow"><div class="name">已封存的唱片</div><div class="muted small">${archiveCount()} 張 · 封存的唱片在演出者進度中算作已聽過</div></div></button>
       <button class="li" data-act="manual"><div class="grow"><div class="name">手動新增唱片</div><div class="muted small">搜不到的獨立發行或實體 CD</div></div></button>
       <button class="li" data-act="export"><div class="grow"><div class="name">匯出備份</div><div class="muted small">下載 JSON 檔</div></div></button>
       <button class="li" data-act="import"><div class="grow"><div class="name">匯入備份</div><div class="muted small">合併到目前的資料</div></div></button>
@@ -1454,7 +1454,7 @@ function openManual() {
   $('#sheet').innerHTML = `<div class="grab"></div>
     <h2 style="margin:0 0 4px">手動新增</h2><div class="muted small">搜不到的唱片（獨立發行、實體 CD…）可以自己加</div>
     <form id="mform">
-      <div class="field"><label>歌手 *</label><input name="artist" required></div>
+      <div class="field"><label>演出者 *</label><input name="artist" required></div>
       <div class="field"><label>專輯名稱 *</label><input name="title" required></div>
       <div class="field" style="display:flex;gap:10px">
         <div style="flex:1"><label>類型</label><select name="type"><option value="Album">專輯</option><option value="EP">EP</option><option value="Single">單曲</option></select></div>
@@ -1553,8 +1553,8 @@ document.addEventListener('click', async e => {
       const hasMarks = myAlbums().some(a => norm(a.artist) === norm(v.name) && a.status !== 'archived');
       if (isFollowed(v.name)) {
         setFollow(v.name, v.id, false);
-        toast(hasMarks ? '已取消加入（有標記專輯，仍會留在歌手列表）' : `已從歌手列表移除「${v.name}」`);
-      } else if (hasMarks) return toast('這位歌手已經在歌手列表');
+        toast(hasMarks ? '已取消加入（有標記專輯，仍會留在演出者列表）' : `已從演出者列表移除「${v.name}」`);
+      } else if (hasMarks) return toast('這位演出者已經在演出者列表');
       else { setFollow(v.name, isSpId(v.id) ? v.id : '', true); toast(`已加入「${v.name}」`); }
       return render();
     }
