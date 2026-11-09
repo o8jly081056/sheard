@@ -192,8 +192,16 @@ let discBusy = 0;
 // 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
 // 回傳陣列；沒抓完時陣列帶 incomplete=true 與 err
 // 先用歌手作品端點；被擋或失敗時，改用搜尋 artist:"名字" 找出他的作品（只留演出者裡有他的，等於不含參與的專輯）
+let discStats = [];   // 診斷用：最近幾次抓歌手作品的統計
+function logDisc(st, raw, r, err) {
+  const byKey = new Map(); raw.forEach(al => { const a = fromSpotify(al), k = albumKey(a); (byKey.get(k) || byKey.set(k, []).get(k)).push(al.name + '/' + al.album_type); });
+  discStats = [{ ...st, src: r.src, raw: raw.length, shown: r.length, err: err ? String(err.message || err).slice(0, 80) : '',
+    merged: [...byKey.values()].filter(v => v.length > 1).slice(0, 15) }, ...discStats].slice(0, 4);
+  return r;
+}
 async function artistAlbums(id, name, onPage, groups = 'album,single') {
   const out = [];
+  const st = { name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), total: null, pages: 0, api: 0 };
   const finish = (err) => {
     const r = dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
     if (err) { r.incomplete = true; r.err = err.message || String(err); }
@@ -215,12 +223,12 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
         }
         const items = (j?.items || []).filter(Boolean);
         if (off === 0 && mk && !items.length) { mk = ''; off -= 10; continue; }
-        out.push(...items);
+        out.push(...items); st.pages++; st.api += items.length; if (off === 0) st.total = j?.total ?? null;
         if (!j?.next || !items.length) break;
         if (onPage) onPage(finish());
         if (net) await sleep(350);
       }
-      if (!apiErr && out.length) return Object.assign(finish(), { src: 'api' });   // 完整清單；回傳空的才改用搜尋
+      if (!apiErr && out.length) return logDisc(st, out, Object.assign(finish(), { src: 'api' }), apiErr);   // 完整清單；回傳空的才改用搜尋
     }
     if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
     // 備援：搜尋。歌手作品端點被擋時改用搜尋拼出完整作品：
@@ -253,7 +261,7 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
     }
     if (!out.length && (searchErr || apiErr)) throw searchErr || apiErr;
     if (searchErr && /限制|上限/.test(searchErr.message)) return finish(searchErr);
-    return Object.assign(finish(), { src: 'search' });
+    return logDisc(st, out, Object.assign(finish(), { src: 'search' }), apiErr || searchErr);
   } finally { discBusy--; }
 }
 async function resolveArtistId(name) {
@@ -505,7 +513,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v38';
+const APP_VER = 'v39';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1476,7 +1484,7 @@ document.addEventListener('click', async e => {
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
     case 'copyDiag': {
-      const txt = JSON.stringify({ v: 'diag2', app: APP_VER, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
+      const txt = JSON.stringify({ v: 'diag3', app: APP_VER, disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
         tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES,
         log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
       try { await navigator.clipboard.writeText(txt); toast('已複製，貼給 Claude 就好'); }
