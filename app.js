@@ -223,23 +223,31 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
       if (!apiErr && out.length) return finish();   // 端點回傳空的也改用搜尋
     }
     if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
-    // 備援：搜尋。artist: 篩選對中文名常常沒結果，所以同時用名字直接搜，合併後只留演出者有他的
+    // 備援：搜尋。歌手作品端點被擋時改用搜尋拼出完整作品：
+    // 1. 專輯搜尋（名字、artist:名字）→ 專輯和 EP
+    // 2. 歌曲搜尋（artist:名字、名字）→ 從每首歌所屬的唱片補齊單曲（單曲在專輯搜尋裡常排很後面或搜不到）
+    // 只留演出者有這位歌手的，並排除合輯；連續 4 頁都沒有他的作品才停
     let searchErr = null;
-    for (const q of [name, `artist:${name}`]) {
+    const passes = [['album', name, 400], ['album', `artist:${name}`, 400], ['track', `artist:${name}`, 500], ['track', name, 300]];
+    for (const [type, q, cap] of passes) {
       let miss = 0;
-      for (let off = 0; off < 200; off += 10) {
-        const path = off ? `/search?type=album&limit=10&offset=${off}&q=${encodeURIComponent(q)}` : `/search?type=album&limit=10&q=${encodeURIComponent(q)}`;
+      for (let off = 0; off < cap; off += 10) {
+        const enc = encodeURIComponent(q);
+        const path = off ? `/search?type=${type}&limit=10&offset=${off}&q=${enc}` : `/search?type=${type}&limit=10&q=${enc}`;
         const net = !isFresh(path);
         let j;
         try { j = await spCached(path); }
         catch (e) { searchErr = e; break; }
-        const items = (j?.albums?.items || []).filter(Boolean);
-        const mine = items.filter(al => al.album_type !== 'compilation' && (al.artists || []).some(x => x.id === id));
-        const before = out.length; out.push(...mine);
+        const box = type === 'album' ? j?.albums : j?.tracks;
+        const items = (box?.items || []).filter(Boolean);
+        const albums = type === 'album' ? items : items.map(t => t.album).filter(Boolean);
+        const mine = albums.filter(al => al.album_type !== 'compilation' && (al.artists || []).some(x => x.id === id));
+        const seen = new Set(out.map(x => x.id)), fresh = mine.filter(al => !seen.has(al.id));
+        out.push(...fresh);
         miss = mine.length ? 0 : miss + 1;
-        if (onPage && out.length > before) onPage(finish());
-        if (!j?.albums?.next || !items.length || miss >= 2) break;
-        if (net) await sleep(350);
+        if (onPage && fresh.length) onPage(finish());
+        if (!box?.next || !items.length || miss >= 4) break;
+        if (net) await sleep(300);
       }
       if (searchErr && /限制|上限/.test(searchErr.message)) break;
     }
@@ -383,7 +391,7 @@ async function spRecent() {
   const j = await sp('/me/player/recently-played?limit=50');
   const m = new Map();
   (j?.items || []).forEach(it => { const a = fromSpotify(it.track.album); const k = albumKey(a); if (!m.has(k)) m.set(k, a); });
-  return remember([...m.values()].filter(notComp));
+  return remember([...m.values()].filter(notComp).slice(0, 10));   // 首頁只放最新 10 張
 }
 
 /* ================= 雲端同步（Supabase） ================= */
@@ -497,7 +505,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v36';
+const APP_VER = 'v37';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
