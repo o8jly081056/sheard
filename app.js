@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v61';
+const APP_VER = 'v62';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -569,7 +569,7 @@ function render() {
   if (state.view && !viewShown) baseSnap = { html: $('#app').innerHTML, cls: $('#app').className, y: baseY };
   viewShown = !!state.view;
   $('#app').classList.toggle('search-mode', state.tab === 'search' && !state.view && !!state.searchFocus);
-  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === state.tab && !state.view));
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === state.tab));
   const app = $('#app');
   if (state.view?.type === 'artist') return renderArtist(app);
   if (state.view?.type === 'archive') return renderArchive(app);
