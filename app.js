@@ -497,7 +497,7 @@ function updateDot() {
 /* ================= 狀態 ================= */
 const state = {
   tab: 'search', view: null, q: '', mode: 'album', results: null, loading: false,
-  libFilter: (() => { try { return localStorage.getItem('heard.libFilter') || null; } catch (e) { return null; } })(), archFilter: null, archQ: '', sf: null, resKind: null, libQ: '', current: null, sp: {}, syncErr: '', login: {}
+  libFilter: (() => { try { return localStorage.getItem('heard.libFilter') || null; } catch (e) { return null; } })(), archFilter: null, archQ: '', artQ: '', sf: null, resKind: null, libQ: '', current: null, sp: {}, syncErr: '', login: {}
 };
 const seen = new Map();
 function remember(list) { list.forEach(a => { const k = albumKey(a); const old = seen.get(k); seen.set(k, old ? { ...old, ...a, _tracks: old._tracks } : a); }); return list; }
@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v60';
+const APP_VER = 'v61';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -989,7 +989,7 @@ function goBack() {
 }
 const TAB_ORDER = ['search', 'artists', 'heard'];
 function switchTab(t) {
-  if (t !== state.tab) { state.libQ = ''; state.searchFocus = false; }
+  if (t !== state.tab) { state.libQ = ''; state.artQ = ''; state.searchFocus = false; }
   state.tab = t; state.view = null; window.scrollTo(0, 0); render();
 }
 // 左右滑手勢（整個畫面都能滑，不限邊緣）：
@@ -1172,11 +1172,13 @@ function renderArtists(app) {
   const all = [...map.values()];
   all.forEach(x => { x.pg = artistProgress(x.name); });
   const hideDone = (() => { try { return localStorage.getItem('heard.hideDoneArtists') === '1'; } catch (e) { return false; } })();
-  const list = hideDone ? all.filter(x => !(x.pg && x.pg.pct >= 100)) : all;
+  let list = hideDone ? all.filter(x => !(x.pg && x.pg.pct >= 100)) : all;
+  if (state.artQ) { const q = state.artQ.toLowerCase(); list = list.filter(x => x.name.toLowerCase().includes(q)); }
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
   app.innerHTML = `
-    <header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者</div>` : ''}</div>${gearBtn()}</header>
+    <div class="home-head"><header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者</div>` : ''}</div>${gearBtn()}</header></div>
+    ${all.length ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="aq" type="search" placeholder="在演出者裡搜尋" value="${esc(state.artQ)}"></div></div>` : ''}
     ${all.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
     ${all.length ? `<div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
@@ -1204,7 +1206,8 @@ function renderArtists(app) {
           ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
         <span class="muted">›</span></button></div>`;
     }).join('')}</div>`
-    : all.length ? '<div class="empty">所有演出者都聽完了</div>' : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
+    : state.artQ ? '<div class="empty">沒有符合的演出者</div>' : all.length ? '<div class="empty">所有演出者都聽完了</div>' : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
+  const aq = $('#aq'); if (aq) aq.oninput = e => { state.artQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#aq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
 
 // 演出者頁的篩選標籤（未聽過、作品類型）所有演出者共用；存在手機上，關掉 App、結束背景後仍會記住
