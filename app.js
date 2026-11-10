@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v58';
+const APP_VER = 'v59';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1180,9 +1180,17 @@ function renderArtists(app) {
     ${all.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
     ${all.length ? `<div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
-      <button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button>
+      <div style="display:flex;gap:6px">${viewBtn('artists', ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
     </div>` : ''}
-    ${list.length ? `<div class="list">${list.map(x => {
+    ${list.length && viewOf('artists') === 'grid' ? `<div class="grid small artist-grid">${list.map(x => {
+      const ce = artistTotals[norm(x.name)], c = ce?.img || x.heard[0]?.cover || '', pg = x.pg;
+      if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
+      return `<button class="acard" data-artist="${x.id}" data-name="${esc(x.name)}">
+        <div class="acard-av">${c ? `<img loading="lazy" src="${esc(c)}" alt="">` : `<span>${esc(x.name[0])}</span>`}</div>
+        <div class="acard-n">${esc(x.name)}</div>
+        <div class="acard-p${pg ? '' : ' muted'}">${pg ? `${pg.pct}%` : `已聽 ${x.heard.length} 張`}</div></button>`;
+    }).join('')}</div>`
+    : list.length ? `<div class="list">${list.map(x => {
       const c = artistTotals[norm(x.name)]?.img || x.heard[0]?.cover || '';
       const pg = x.pg;
       const ce = artistTotals[norm(x.name)];
