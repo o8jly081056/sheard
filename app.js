@@ -497,7 +497,7 @@ function updateDot() {
 /* ================= 狀態 ================= */
 const state = {
   tab: 'search', view: null, q: '', mode: 'album', results: null, loading: false,
-  libFilter: null, archFilter: null, archQ: '', sf: null, resKind: null, libQ: '', current: null, sp: {}, syncErr: '', login: {}
+  libFilter: (() => { try { return localStorage.getItem('heard.libFilter') || null; } catch (e) { return null; } })(), archFilter: null, archQ: '', sf: null, resKind: null, libQ: '', current: null, sp: {}, syncErr: '', login: {}
 };
 const seen = new Map();
 function remember(list) { list.forEach(a => { const k = albumKey(a); const old = seen.get(k); seen.set(k, old ? { ...old, ...a, _tracks: old._tracks } : a); }); return list; }
@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v55';
+const APP_VER = 'v56';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -989,7 +989,7 @@ function goBack() {
 }
 const TAB_ORDER = ['search', 'artists', 'heard'];
 function switchTab(t) {
-  if (t !== state.tab) { state.libFilter = null; state.libQ = ''; state.searchFocus = false; }
+  if (t !== state.tab) { state.libQ = ''; state.searchFocus = false; }
   state.tab = t; state.view = null; window.scrollTo(0, 0); render();
 }
 // 左右滑手勢（整個畫面都能滑，不限邊緣）：
@@ -1522,7 +1522,10 @@ document.addEventListener('click', async e => {
   }
   if (d.f) {
     const v = d.v || null;
-    if (d.f === 'lib') state[libSt() === 'archived' ? 'archFilter' : 'libFilter'] = v;
+    if (d.f === 'lib') {
+      if (libSt() === 'archived') state.archFilter = v;
+      else { state.libFilter = v; try { v ? localStorage.setItem('heard.libFilter', v) : localStorage.removeItem('heard.libFilter'); } catch (e) {} }   // 已聽過的標籤：關掉 App 後仍記得
+    }
     else if (d.f === 'artist') { state.view.filter = v; saveArtistFilter(state.view); }
     else if (d.f === 'search') {
       state.sf = v;
