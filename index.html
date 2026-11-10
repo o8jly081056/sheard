@@ -209,6 +209,10 @@ nav.tabs button.on .ic-off{display:none}
 .toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:var(--fg);color:#111;padding:10px 18px;border-radius:999px;font-weight:600;opacity:0;transition:.2s;z-index:40;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .spinner{width:28px;height:28px;border:3px solid var(--bg3);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;margin:40px auto}
+#ptr{position:fixed;left:50%;top:calc(var(--safe-t) + 4px);margin-left:-18px;width:36px;height:36px;border-radius:50%;background:#2a2a2a;z-index:40;opacity:0;pointer-events:none;display:flex;align-items:center;justify-content:center;transform:translateY(-40px)}
+.ptr-ic{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%}
+#ptr.ready .ptr-ic{border-top-color:var(--accent)}
+#ptr.busy .ptr-ic{border-top-color:var(--accent);animation:sp .8s linear infinite}
 .spinner.sm{width:20px;height:20px;margin:16px auto}
 @keyframes sp{to{transform:rotate(360deg)}}
 .swiping{position:relative;z-index:2;background:var(--bg);box-shadow:-8px 0 24px rgba(0,0,0,.45);will-change:transform}

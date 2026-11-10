@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v51';
+const APP_VER = 'v52';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1581,6 +1581,53 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { sy
 $('#scrim').onclick = () => closeSheet();
 // 面板打開時，在背景遮罩上滑動不會捲動底下的頁面
 $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+// 首頁下拉重新整理：在頂部往下拉超過門檻後放開，重新抓最近播放並同步
+(() => {
+  const TH = 70, MAX = 110;
+  let y0 = 0, x0 = 0, pull = 0, on = false, mode = null, busy = false;
+  const ptr = document.createElement('div');
+  ptr.id = 'ptr'; ptr.innerHTML = '<div class="ptr-ic"></div>';
+  document.body.appendChild(ptr);
+  const app = () => $('#app');
+  const ok = () => state.tab === 'search' && !state.view && !state.searchFocus && !state.results && !state.q
+    && !$('#sheet').classList.contains('show') && !document.querySelector('.dialog');
+  const paint = (d, anim) => {
+    const a = app();
+    [a, ptr].forEach(el => el.style.transition = anim ? 'transform .25s ease, opacity .25s' : 'none');
+    a.style.transform = d ? `translateY(${d}px)` : '';
+    ptr.style.transform = `translateY(${d - 40}px)`;
+    ptr.style.opacity = d ? Math.min(1, d / TH) : 0;
+    ptr.firstChild.style.transform = `rotate(${d * 4}deg)`;
+    ptr.classList.toggle('ready', d >= TH);
+  };
+  document.addEventListener('touchstart', e => {
+    if (busy || e.touches.length !== 1 || !ok() || (window.scrollY || document.documentElement.scrollTop) > 0) return;
+    on = true; mode = null; pull = 0; y0 = e.touches[0].clientY; x0 = e.touches[0].clientX;
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!on) return;
+    const dy = e.touches[0].clientY - y0, dx = e.touches[0].clientX - x0;
+    if (!mode) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      mode = dy > 0 && Math.abs(dy) > Math.abs(dx) && (window.scrollY || 0) <= 0 ? 'pull' : 'no';
+      if (mode === 'no') { on = false; return; }
+    }
+    e.preventDefault();
+    pull = Math.min(MAX, dy > 0 ? dy * 0.5 : 0);
+    paint(pull);
+  }, { passive: false });
+  const end = async () => {
+    if (!on) return; on = false;
+    if (mode !== 'pull') return;
+    if (pull < TH) return paint(0, true);
+    busy = true; ptr.classList.add('busy'); paint(56, true);
+    try { await Promise.allSettled([spOn() ? loadSpotifyHome(true) : null, sbUser ? syncNow() : null]); } catch (e) {}
+    ptr.classList.remove('busy'); busy = false; paint(0, true);
+    if (state.tab === 'search' && !state.view && !state.results) updateSearchBody();
+  };
+  document.addEventListener('touchend', end); document.addEventListener('touchcancel', end);
+})();
+
 // 專輯列表的點擊：手指放開就直接打開（iPhone 點在文字上有時不會觸發 click）
 (() => {
   let row = null, x0 = 0, y0 = 0, t0 = 0, moved = false;
