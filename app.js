@@ -385,7 +385,8 @@ async function spRaw(path, retry = true) {
     try { await spTokenReq({ grant_type: 'refresh_token', refresh_token: spTok.refresh }); }
     catch (e) { spotifyLogout(); render(); throw new Error('Spotify 登入已過期，請重新連結'); }
   }
-  const res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access } });
+  // 個人資料（最近播放、正在播放）每次都要最新的，不讓瀏覽器用快取
+  const res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access }, cache: path.startsWith('/me') ? 'no-store' : 'default' });
   if (res.ok && cb.strikes) { cb.strikes = 0; saveCool(); }
   if (res.status === 204) return null;
   if (res.status === 401 && retry) { spTok.exp = 0; return spRaw(path, false); }
@@ -411,8 +412,11 @@ async function spNowPlaying() {
   return { album: remember([fromSpotify(j.item.album)])[0], track: j.item.name, playing: j.is_playing };
 }
 async function spRecent() {
-  const j = await sp('/me/player/recently-played?limit=50');
+  // 正在播放的專輯也算進最近播放（Spotify 要等歌播完才會寫進最近播放紀錄），放在最前面
+  const [j, now] = await Promise.all([sp('/me/player/recently-played?limit=50'), sp('/me/player/currently-playing').catch(() => null)]);
   const m = new Map();
+  const cur = now?.item?.album && notComp(fromSpotify(now.item.album)) ? fromSpotify(now.item.album) : null;
+  if (cur) m.set(albumKey(cur), cur);
   (j?.items || []).forEach(it => { const a = fromSpotify(it.track.album); const k = albumKey(a); if (!m.has(k)) m.set(k, a); });
   return remember([...m.values()].filter(notComp).slice(0, 10));   // 首頁只放最新 10 張
 }
@@ -538,7 +542,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v62';
+const APP_VER = 'v63';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -801,19 +805,21 @@ function homeHTML() {
     ${sec('最近播放的專輯', recent)}`;
 }
 
-let spLoading = false;
-async function loadSpotifyHome(force) {
-  if (spLoading) return;
+let spLoading = null;
+function loadSpotifyHome(force) {
+  if (spLoading) return spLoading;          // 已經在抓：等同一次的結果
   const s = state.sp;
-  if (!force && s.loadedAt && Date.now() - s.loadedAt < 60000) return;
-  spLoading = true; s.loadedAt = Date.now(); s.err = '';
+  if (!force && s.loadedAt && Date.now() - s.loadedAt < 60000) return Promise.resolve();
+  return spLoading = loadSpotifyHome_(s).finally(() => { spLoading = null; });
+}
+async function loadSpotifyHome_(s) {
+  s.loadedAt = Date.now(); s.err = '';
   const tasks = [
     spRecent().then(v => s.recent = v)
   ];
   const res = await Promise.allSettled(tasks);
   const fail = res.find(x => x.status === 'rejected');
   if (fail) { s.err = fail.reason.message; s.recent ??= []; }
-  spLoading = false;
   if (state.tab === 'search' && !state.view && !state.results && !state.current) updateSearchBody();
 }
 async function doSearch(q) {
@@ -1633,7 +1639,10 @@ $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: fa
     if (mode !== 'pull') return;
     if (pull < TH) return paint(0, true);
     busy = true; ptr.classList.add('busy'); paint(56, true);
+    const t0 = Date.now();
+    if (spOn() && spLoading) await spLoading.catch(() => {});   // 先等前一次抓完，再強制重抓一次最新的
     try { await Promise.allSettled([spOn() ? loadSpotifyHome(true) : null, sbUser ? syncNow() : null]); } catch (e) {}
+    if (Date.now() - t0 < 500) await new Promise(r => setTimeout(r, 500 - (Date.now() - t0)));
     ptr.classList.remove('busy'); busy = false; paint(0, true);
     if (state.tab === 'search' && !state.view && !state.results) updateSearchBody();
   };
