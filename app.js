@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v56';
+const APP_VER = 'v57';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -893,13 +893,13 @@ const timeOf = (a, st) => (st === 'heard' ? a.heardAt : st === 'archived' ? a.up
 // 每個排序：cmp 是「遞增」比較；dirs[0] 是遞增的說法、dirs[1] 是遞減；def 為預設是否遞減
 const SORTS = {
   time:   { label: () => '最近新增', dirs: ['舊 → 新', '新 → 舊'], def: true,  cmp: (a, b, st) => timeOf(a, st) - timeOf(b, st) },
-  title:  { label: () => '依字母順序', dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.title, b.title) },
-  artist: { label: () => '藝人',   dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') }
+  artist: { label: () => '藝人',   dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.artist, b.artist) || (a.year || '').localeCompare(b.year || '') },
+  title:  { label: () => '專輯', dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.title, b.title) }
 };
 // 藝人頁的排序：筆畫、聽過進度
 const ARTIST_SORTS = {
-  pct:  { label: () => '聽過進度', dirs: ['低 → 高', '高 → 低'], def: true,  cmp: (a, b) => (a.pg ? a.pg.pct : -1) - (b.pg ? b.pg.pct : -1) || (a.pg?.heard || a.heard.length) - (b.pg?.heard || b.heard.length) },
-  name: { label: () => '筆畫',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.name, b.name) }
+  pct:  { label: () => '進度', dirs: ['低 → 高', '高 → 低'], def: true,  cmp: (a, b) => (a.pg ? a.pg.pct : -1) - (b.pg ? b.pg.pct : -1) || (a.pg?.heard || a.heard.length) - (b.pg?.heard || b.heard.length) },
+  name: { label: () => '藝人',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.name, b.name) }
 };
 const sortsFor = st => st === 'artists' ? ARTIST_SORTS : SORTS;
 function sortOf(st) {
