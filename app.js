@@ -542,7 +542,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v66';
+const APP_VER = 'v67';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1203,14 +1203,12 @@ function renderArtists(app) {
       const pg = x.pg;
       const ce = artistTotals[norm(x.name)];
       if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
-      return `<div class="sw">
-        <button class="sw-del" data-delartist="${esc(x.name)}">刪除</button>
-        <button class="li sw-fg" data-artist="${x.id}" data-name="${esc(x.name)}">
+      return `<button class="li" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="av">${c ? `<img src="${esc(c)}" alt="">` : esc(x.name[0])}</div>
         <div class="grow"><div class="row-between"><div class="name">${esc(x.name)}</div>${pg ? `<b class="pct">${pg.pct}%</b>` : ''}</div>
           <div class="muted small">${pg ? `聽過 ${pg.heard} / ${pg.total} 張` : `已聽 ${x.heard.length} 張${spOn() ? ' · 計算中…' : ''}`}</div>
           ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
-        <span class="muted">›</span></button></div>`;
+        <span class="muted">›</span></button>`;
     }).join('')}</div>`
     : state.artQ ? '<div class="empty">沒有符合的演出者</div>' : all.length ? '<div class="empty">所有演出者都聽完了</div>' : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
   const aq = $('#aq'); if (aq) aq.oninput = e => { state.artQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#aq'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -1570,11 +1568,14 @@ document.addEventListener('click', async e => {
     case 'follow': {
       const v = state.view; if (!v) return;
       const hasMarks = myAlbums().some(a => norm(a.artist) === norm(v.name) && a.status !== 'archived');
+      // 已加入 → 移除（一定先跳確認）：有已聽過的專輯就連標記一起刪；只是加入的就只取消加入
+      if (hasMarks) return deleteArtist(v.name);
       if (isFollowed(v.name)) {
-        setFollow(v.name, v.id, false);
-        toast(hasMarks ? '已取消加入（有標記專輯，仍會留在演出者列表）' : `已從演出者列表移除「${v.name}」`);
-      } else if (hasMarks) return toast('這位演出者已經在演出者列表');
-      else { setFollow(v.name, isSpId(v.id) ? v.id : '', true); toast(`已加入「${v.name}」`); }
+        ask({ title: `移除「${v.name}」？`, msg: '會從演出者列表移除這位演出者。', ok: '移除', cancel: '取消' })
+          .then(ok => { if (!ok) return; setFollow(v.name, v.id, false); render(); toast(`已移除「${v.name}」`); });
+        return;
+      }
+      setFollow(v.name, isSpId(v.id) ? v.id : '', true); toast(`已加入「${v.name}」`);
       return render();
     }
     case 'unheardToggle': if (state.view) { state.view.unheard = !state.view.unheard; saveArtistFilter(state.view); } return render();
