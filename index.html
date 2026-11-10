@@ -273,8 +273,11 @@ input[type=date]::-webkit-date-and-time-value{text-align:left}
 .sort-btn span{overflow:hidden;text-overflow:ellipsis}
 .sort-btn svg{flex:none}
 @media (max-width:400px){.sort-btn .muted{display:none}.sort-btn{padding:0 12px}.seg button{width:30px}}
-.sort-opt.on .name{color:var(--accent)}
-.sort-check{color:var(--accent)}
+.sort-sheet{margin:0 -2px}
+.sort-h{font-size:16px;font-weight:700;line-height:22px;padding:2px 0 10px;color:var(--fg)}
+.sort-opt{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;padding:0;font-size:16px;font-weight:400;line-height:22px;color:var(--fg);text-align:left}
+.sort-opt.on{color:#1ed760}
+.sort-opt svg{width:20px;height:20px;flex:none}
 .card .no{color:var(--fg3);font-weight:700;margin-right:6px;font-variant-numeric:tabular-nums}
 .dialog{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:24px;opacity:0;transition:opacity .18s}
 .dialog.show{opacity:1}

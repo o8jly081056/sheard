@@ -538,7 +538,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v54';
+const APP_VER = 'v55';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -915,12 +915,10 @@ function setSort(st, key) {
 function openSortMenu() {
   state.current = null;
   const st = libSt(), cur = sortOf(st);
-  $('#sheet').innerHTML = `<div class="grab"></div><h2 style="margin:0 0 8px">分類方法</h2>
-    <div class="list">${Object.entries(sortsFor(st)).map(([k, o]) => {
+  $('#sheet').innerHTML = `<div class="grab"></div><div class="sort-sheet"><div class="sort-h">分類方法</div>
+    ${Object.entries(sortsFor(st)).map(([k, o]) => {
       const on = cur.key === k;
-      return `<button class="li sort-opt ${on ? 'on' : ''}" data-sort="${k}">
-        <div class="grow"><div class="name">${o.label(st)}</div></div>
-        ${on ? `<span class="sort-check">${I.check}</span>` : ''}</button>`;
+      return `<button class="sort-opt ${on ? 'on' : ''}" data-sort="${k}"><span>${o.label(st)}</span>${on ? I.check : ''}</button>`;
     }).join('')}</div>`;
   showSheet();
 }
