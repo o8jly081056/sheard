@@ -542,7 +542,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v65';
+const APP_VER = 'v66';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1418,9 +1418,9 @@ function openMenu() {
         <button class="btn sm" data-act="syncNow">立即同步</button></div>
         <div style="margin-top:10px"><button class="btn sm" data-act="logout">登出</button></div></div>`
     : `<div class="panel"><div class="small muted">登入後，手機和電腦會自動同步。第一次使用請按「註冊」，之後每台裝置都用同一組帳密登入。</div>
-        <form id="loginForm" style="margin-top:8px">
-          <input id="email" type="email" autocomplete="email" placeholder="Email" value="${esc(L.email || '')}" required>
-          <input id="pw" type="password" autocomplete="current-password" placeholder="密碼（至少 6 個字）" minlength="6" required style="margin-top:8px">
+        <form id="loginForm" method="post" action="#" style="margin-top:8px">
+          <input id="email" name="username" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Email" value="${esc(L.email || '')}" required>
+          <input id="pw" name="password" type="password" autocomplete="current-password" placeholder="密碼（至少 6 個字）" minlength="6" required style="margin-top:8px">
           <div class="btn-row"><button class="btn" type="submit" name="signup">註冊</button><button class="btn primary" type="submit">登入</button></div>
         </form>
         ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>`;
@@ -1446,6 +1446,7 @@ function openMenu() {
   const lf = $('#loginForm'); if (lf) lf.onsubmit = async e => {
     e.preventDefault(); L.err = '';
     const signup = e.submitter?.name === 'signup';
+    if (signup) $('#pw').setAttribute('autocomplete', 'new-password');
     L.email = $('#email').value.trim();
     const cred = { email: L.email, password: $('#pw').value };
     e.submitter && (e.submitter.disabled = true);
