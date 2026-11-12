@@ -552,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v73';
+const APP_VER = 'v74';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1418,7 +1418,7 @@ function metaHTML(a, tracks) {
 }
 function tracksHTML(tracks) {
   const fmt = ms => ms ? `${Math.floor(ms / 60000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}` : '';
-  return (tracks || []).map(t => `<div${t.id ? ` data-tid="${t.id}"` : ''}><span>${t.n}</span><b style="flex:1;font-weight:400">${esc(t.name)}</b><i class="saved-ic${savedTracks.get(t.id) ? ' on' : ''}">${I.savedOn}</i><em class="muted small" style="font-style:normal">${fmt(t.ms)}</em></div>`).join('');
+  return (tracks || []).map(t => `<div${t.id ? ` data-tid="${t.id}"` : ''}><span>${t.n}</span><b style="flex:1;font-weight:400">${esc(t.name)}</b><em class="muted small" style="font-style:normal">${fmt(t.ms)}</em><i class="saved-ic${savedTracks.get(t.id) ? ' on' : ''}">${I.savedOn}</i></div>`).join('');
 }
 // 曲目載入完成：只更新資訊列與曲目區，面板其他部分（封面、按鈕）不重建
 function applyTracks(k) {
