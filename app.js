@@ -552,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v72';
+const APP_VER = 'v73';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -914,7 +914,7 @@ const SORTS = {
 };
 // 演出者頁的排序：筆畫、聽過進度
 const ARTIST_SORTS = {
-  pct:  { label: () => '進度', dirs: ['低 → 高', '高 → 低'], def: true,  cmp: (a, b) => (a.pg ? a.pg.pct : -1) - (b.pg ? b.pg.pct : -1) || (a.pg?.heard || a.heard.length) - (b.pg?.heard || b.heard.length) },
+  pct:  { label: () => '進度', dirs: ['低 → 高', '高 → 低'], def: true,  cmp: (a, b) => (a.pg ? a.pg.pct : -1) - (b.pg ? b.pg.pct : -1) },
   name: { label: () => '演出者',     dirs: ['少 → 多', '多 → 少'], def: false, cmp: (a, b) => colStroke.compare(a.name, b.name) }
 };
 const sortsFor = st => st === 'artists' ? ARTIST_SORTS : SORTS;
@@ -1228,7 +1228,8 @@ function renderArtists(app) {
   let list = df === 'undone' ? all.filter(x => !isDone100(x)) : df === 'done' ? all.filter(isDone100) : all;
   if (state.artQ) { const q = state.artQ.toLowerCase(); list = list.filter(x => x.name.toLowerCase().includes(q)); }
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
-  list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
+  // 進度相同時，一律依筆畫由少到多（數字 → 英文 → 中文），不受反轉影響
+  list.sort((a, b) => { const r = sdef.cmp(a, b); return r ? (so.desc ? -r : r) : colStroke.compare(a.name, b.name); });
   app.innerHTML = `
     <div class="home-head"><header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者${artRefresh ? ` · 更新中 ${artRefresh.done}/${artRefresh.total}` : ''}</div>` : ''}</div>${gearBtn()}</header></div>
     ${all.length ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="aq" type="search" placeholder="在演出者裡搜尋" value="${esc(state.artQ)}"></div></div>` : ''}
