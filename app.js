@@ -360,6 +360,7 @@ function logSp(entry) {
 }
 function countOf(j) {
   if (!j) return '無內容';
+  if (Array.isArray(j)) return `已收藏 ${j.filter(Boolean).length}/${j.length}`;
   const parts = [];
   if (j.albums) parts.push(`專輯 ${j.albums.items?.length ?? 0}/${j.albums.total ?? '?'}`);
   if (j.artists && !j.name) parts.push(`演出者 ${j.artists.items?.length ?? 0}/${j.artists.total ?? '?'}`);
@@ -548,7 +549,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v69';
+const APP_VER = 'v70';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1160,12 +1161,19 @@ async function pumpArtistTotals() {
         const id = isSpId(rid) ? rid : await resolveArtistId(name);
         if (freshKeys.has(name) && id) freshKeys.add(id);
         const albums = id ? await artistAlbums(id, name) : null;
-        if (freshKeys.has(name)) { freshKeys.delete(name); freshKeys.delete(id); }
+        if (freshKeys.has(name)) { freshKeys.delete(name); freshKeys.delete(id); freshKeys.delete(encodeURIComponent(name)); }
         const img = id ? await artistImage(id, name).catch(() => '') : '';
         // 如果這段時間使用者已經點進演出者頁更新過，就不要覆蓋
         if (albums?.length && !albums.incomplete && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
       } catch (e) {}
       atRunning--;
+      if (artRefresh) {
+        artRefresh.done++;
+        if (artRefresh.done >= artRefresh.total || (!atQueue.size && !atRunning)) {
+          refreshLog.unshift({ tab: 'artists-bg', at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), ms: Date.now() - artRefresh.t0, n: artRefresh.total });
+          toast(`已重新整理 ${artRefresh.total} 位演出者`); artRefresh = null;
+        }
+      }
       clearTimeout(atRenderT);
       atRenderT = setTimeout(() => { if (state.tab === 'artists' && !state.view && !state.current) render(); }, 400);
       if (!atQueue.size && !atRunning) atGap = 4000;
@@ -1182,12 +1190,16 @@ function listedArtists() {
   return [...m.values()];
 }
 // 下拉重新整理演出者列表：每位演出者都不用快取、重新向 Spotify 抓完整作品數
+let artRefresh = null;                  // 下拉重整演出者的進度 { total, done }
+const refreshLog = [];                  // 診斷用：最近幾次下拉重整花多久、結果
 function refreshAllArtists() {
-  if (!spOn()) return;
+  if (!spOn()) return 0;
   const names = listedArtists();
+  artRefresh = names.length ? { total: names.length, done: 0, t0: Date.now() } : null;
   names.forEach(n => { freshKeys.add(n); freshKeys.add(encodeURIComponent(n)); atQueue.add(n); });
   atLimit = atDone + names.length; atGap = 1500;
   pumpArtistTotals();
+  return names.length;
 }
 // 演出者列表的篩選：'undone' 未聽完、'done' 已聽完（100%）、'' 全部；存在這台裝置
 function artistDoneFilter() {
@@ -1215,9 +1227,9 @@ function renderArtists(app) {
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
   app.innerHTML = `
-    <div class="home-head"><header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者</div>` : ''}</div>${gearBtn()}</header></div>
+    <div class="home-head"><header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者${artRefresh ? ` · 更新中 ${artRefresh.done}/${artRefresh.total}` : ''}</div>` : ''}</div>${gearBtn()}</header></div>
     ${all.length ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="aq" type="search" placeholder="在演出者裡搜尋" value="${esc(state.artQ)}"></div></div>` : ''}
-    ${all.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip${df === 'undone' ? ' on' : ''}" data-act="doneFilter" data-v="undone">未聽完</button><button class="chip${df === 'done' ? ' on' : ''}" data-act="doneFilter" data-v="done">已聽完</button></div>` : ''}
+    ${all.length ? `<div class="chips" style="margin-bottom:10px">${[['', '全部'], ['undone', '未聽完'], ['done', '已聽完']].map(([v, l]) => `<button class="chip${df === v ? ' on' : ''}" data-act="doneFilter" data-v="${v}">${l}</button>`).join('')}</div>` : ''}
     ${all.length ? `<div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
       <div style="display:flex;gap:6px">${viewBtn('artists', ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
@@ -1393,6 +1405,7 @@ async function openAlbum(k) {
   if (img && !img.complete && img.decode) await Promise.race([img.decode().catch(() => {}), sleep(80)]);
   if (state.current !== k) return;
   showSheet(); loadTracks(k);
+  const had = seen.get(k)?._tracks; if (had?.length) checkSaved(had);
 }
 function metaHTML(a, tracks) {
   const totalMs = (tracks || []).reduce((t, x) => t + (x.ms || 0), 0);
@@ -1452,10 +1465,13 @@ function loadPlaylists(force) {
     plIndex = { at: Date.now(), pl: next };
     plSet = new Set(Object.values(next).flatMap(p => p.ids));
     try { localStorage.setItem(PL_KEY, JSON.stringify(plIndex)); } catch (e) {}
-  })().catch(e => console.warn('playlists', e)).finally(() => { plLoading = null; });
+  })().catch(e => { libDiag.plErr = e.message; console.warn('playlists', e); }).finally(() => { plLoading = null; });
 }
+const libDiag = { checks: 0, saved: 0, err: '', skipped: '' };
 async function checkSaved(tracks) {
-  if (!spOn() || !hasLibScope()) return;
+  if (!spOn()) return;
+  if (!hasLibScope()) { libDiag.skipped = '權限不足：需要重新連結 Spotify'; return; }
+  libDiag.skipped = '';
   const ids = (tracks || []).map(t => t.id).filter(Boolean);
   if (!ids.length) return;
   const mark = () => { ids.forEach(id => { if (plSet.has(id)) savedTracks.set(id, true); }); paintSaved(); };
@@ -1464,9 +1480,10 @@ async function checkSaved(tracks) {
     for (let i = 0; i < ids.length; i += 40) {
       const part = ids.slice(i, i + 40);
       const r = await sp('/me/library/contains?uris=' + part.map(id => 'spotify:track:' + id).join(','));
-      if (Array.isArray(r)) part.forEach((id, n) => savedTracks.set(id, !!r[n] || plSet.has(id)));
+      if (Array.isArray(r)) { part.forEach((id, n) => savedTracks.set(id, !!r[n] || plSet.has(id))); libDiag.checks++; libDiag.saved += r.filter(Boolean).length; libDiag.err = ''; }
+      else libDiag.err = '回應格式不對：' + JSON.stringify(r).slice(0, 80);
     }
-  } catch (e) {}
+  } catch (e) { libDiag.err = e.message; }
   mark();
   await loadPlaylists();
   mark();
@@ -1650,13 +1667,14 @@ document.addEventListener('click', async e => {
     case 'menu': return openMenu();
     case 'copyDiag': {
       const txt = JSON.stringify({ v: 'diag3', app: APP_VER, disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
-        tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES,
+        tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES, granted: spTok?.scope ?? '(未記錄，需重新連結)',
+        lib: { ...libDiag, playlists: Object.keys(plIndex.pl).length, plTracks: plSet.size, plAt: plIndex.at ? new Date(plIndex.at).toLocaleString('zh-TW', { hour12: false }) : null }, refresh: refreshLog,
         log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
       try { await navigator.clipboard.writeText(txt); toast('已複製，貼給 Claude 就好'); }
       catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
       return;
     }
-    case 'doneFilter': { const v = artistDoneFilter() === d.v ? '' : d.v; try { localStorage.setItem('heard.artistDone', v); } catch (e) {} return render(); }
+    case 'doneFilter': { try { localStorage.setItem('heard.artistDone', d.v || ''); } catch (e) {} return render(); }
     case 'follow': {
       const v = state.view; if (!v) return;
       const hasMarks = myAlbums().some(a => norm(a.artist) === norm(v.name) && a.status !== 'archived');
@@ -1737,19 +1755,25 @@ $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: fa
     const t0 = Date.now(), tab = state.tab;
     // 雲端同步：如果剛好在同步，等它結束再完整同步一次
     const sync = async () => { if (!sbUser) return; for (let i = 0; syncing && i < 40; i++) await sleep(250); await syncNow(); };
+    let msg = '', n = 0;
+    const syncMsg = () => !sbUser ? '' : state.syncErr ? '同步失敗：' + state.syncErr : '已同步';
     try {
       if (tab === 'search') {
         if (spOn() && spLoading) await spLoading.catch(() => {});   // 先等前一次抓完，再強制重抓一次最新的
         await Promise.allSettled([spOn() ? loadSpotifyHome(true) : null, sync()]);
+        msg = state.sp.err ? '最近播放更新失敗：' + state.sp.err : spOn() ? '最近播放已更新' : syncMsg();
       } else if (tab === 'artists') {
         await sync();
-        refreshAllArtists();
-        // 等演出者作品數重抓（最多 20 秒；沒抓完的會在背景繼續，數字會自己更新）
-        for (let i = 0; (atQueue.size || atRunning) && i < 80; i++) await sleep(250);
+        n = refreshAllArtists();   // 每位演出者在背景一位一位重抓，標題下方顯示進度，全部完成會提示
+        msg = n ? '' : syncMsg();
       } else {
         await sync();
+        msg = syncMsg();
       }
-    } catch (e) {}
+    } catch (e) { msg = '重新整理失敗：' + e.message; }
+    refreshLog.unshift({ tab, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), ms: Date.now() - t0, msg: msg || `演出者 ${n} 位排入重抓` });
+    refreshLog.length = Math.min(refreshLog.length, 8);
+    if (msg) toast(msg);
     if (Date.now() - t0 < 500) await new Promise(r => setTimeout(r, 500 - (Date.now() - t0)));
     ptr.classList.remove('busy'); busy = false; paint(0, true);
     if (state.tab !== tab || state.view) return;
