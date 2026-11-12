@@ -153,10 +153,14 @@ function pcSave() {
     catch (e) { Object.keys(pcache).sort((a, b) => pcache[a].t - pcache[b].t).slice(0, Math.ceil(Object.keys(pcache).length / 2)).forEach(k => delete pcache[k]); try { localStorage.setItem(PC_KEY, JSON.stringify(pcache)); } catch (e2) {} }
   }, 500);
 }
+// 下拉重新整理時：這些演出者（id 或名字）的作品不用快取，直接向 Spotify 重抓
+const freshKeys = new Set();
+const forceFresh = path => [...freshKeys].some(k => path.includes(k));
 async function spCached(path) {
-  if (cache.has(path)) return cache.get(path);
+  const fresh = freshKeys.size && forceFresh(path);
+  if (!fresh && cache.has(path)) return cache.get(path);
   const ttl = ttlFor(path), hit = pcache[path];
-  if (ttl && hit && Date.now() - hit.t < ttl) { cache.set(path, hit.j); return hit.j; }
+  if (!fresh && ttl && hit && Date.now() - hit.t < ttl) { cache.set(path, hit.j); return hit.j; }
   const j = await sp(path); cache.set(path, j);
   if (ttl && !isEmptyResp(j)) { pcache[path] = { t: Date.now(), j }; pcSave(); }
   return j;
@@ -201,7 +205,7 @@ async function searchArtistsTop(q) {
   const nq = norm(q);
   return list.sort((a, b) => (norm(b.name) === nq) - (norm(a.name) === nq)).slice(0, 5);
 }
-const isFresh = path => cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path));
+const isFresh = path => !(freshKeys.size && forceFresh(path)) && (cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path)));
 let discBusy = 0;
 // 抓演出者在 Spotify 上的全部作品（專輯、單曲和迷你專輯；不含參與的專輯與合輯）
 // 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
@@ -544,7 +548,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v68';
+const APP_VER = 'v69';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1135,17 +1139,17 @@ function artistProgress(name) {
   const c = artistTotals[norm(name)]; if (!c) return null;
   return statsFor(name, c.keys);
 }
-const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0;
+const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0, atLimit = 15, atGap = 4000;
 function queueArtistTotal(name, id) {
   const c = artistTotals[norm(name)];
-  if (!spOn() || atQueue.has(name) || (c && !atStale(c) && c.img !== undefined)) return;
+  if (!spOn() || atQueue.has(name) || (c && !atStale(c) && c.img !== undefined && !freshKeys.has(name))) return;
   atQueue.add(name); pumpArtistTotals(id);
 }
 async function pumpArtistTotals() {
   const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
   if (cw) { setTimeout(pumpArtistTotals, cw * 1000 + 500); return; }
-  if (atDone >= 15) return;
-  if (discBusy) { setTimeout(pumpArtistTotals, 4000); return; }
+  if (atDone >= atLimit) return;
+  if (discBusy) { setTimeout(pumpArtistTotals, atGap); return; }
   while (atRunning < 1 && atQueue.size) {
     atDone++;
     const name = atQueue.values().next().value; atQueue.delete(name); atRunning++;
@@ -1154,7 +1158,9 @@ async function pumpArtistTotals() {
         const started = Date.now();
         const rid = rowArtistId(name);
         const id = isSpId(rid) ? rid : await resolveArtistId(name);
+        if (freshKeys.has(name) && id) freshKeys.add(id);
         const albums = id ? await artistAlbums(id, name) : null;
+        if (freshKeys.has(name)) { freshKeys.delete(name); freshKeys.delete(id); }
         const img = id ? await artistImage(id, name).catch(() => '') : '';
         // 如果這段時間使用者已經點進演出者頁更新過，就不要覆蓋
         if (albums?.length && !albums.incomplete && !((artistTotals[norm(name)]?.at || 0) > started)) setArtistTotal(name, id, albums, img);
@@ -1162,11 +1168,27 @@ async function pumpArtistTotals() {
       atRunning--;
       clearTimeout(atRenderT);
       atRenderT = setTimeout(() => { if (state.tab === 'artists' && !state.view && !state.current) render(); }, 400);
-      setTimeout(pumpArtistTotals, 4000);
+      if (!atQueue.size && !atRunning) atGap = 4000;
+      setTimeout(pumpArtistTotals, atGap);
     })();
   }
 }
 
+// 演出者列表上的所有演出者名字（規則同 renderArtists）
+function listedArtists() {
+  const m = new Map();
+  myAlbums().filter(a => a.status !== 'archived').forEach(a => m.set(norm(a.artist), a.artist));
+  followed.forEach(f => { if (!m.has(norm(f.name))) m.set(norm(f.name), f.name); });
+  return [...m.values()];
+}
+// 下拉重新整理演出者列表：每位演出者都不用快取、重新向 Spotify 抓完整作品數
+function refreshAllArtists() {
+  if (!spOn()) return;
+  const names = listedArtists();
+  names.forEach(n => { freshKeys.add(n); freshKeys.add(encodeURIComponent(n)); atQueue.add(n); });
+  atLimit = atDone + names.length; atGap = 1500;
+  pumpArtistTotals();
+}
 // 演出者列表的篩選：'undone' 未聽完、'done' 已聽完（100%）、'' 全部；存在這台裝置
 function artistDoneFilter() {
   try {
@@ -1671,7 +1693,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { sy
 $('#scrim').onclick = () => closeSheet();
 // 面板打開時，在背景遮罩上滑動不會捲動底下的頁面
 $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: false });
-// 首頁下拉重新整理：在頂部往下拉超過門檻後放開，重新抓最近播放並同步
+// 下拉重新整理（首頁／演出者／已聽過）：首頁重抓最近播放；演出者重抓每位的完整作品數；三頁都會完整雲端同步
 (() => {
   const TH = 70, MAX = 110;
   let y0 = 0, x0 = 0, pull = 0, on = false, mode = null, busy = false;
@@ -1679,7 +1701,8 @@ $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: fa
   ptr.id = 'ptr'; ptr.innerHTML = '<div class="ptr-ic"></div>';
   document.body.appendChild(ptr);
   const app = () => $('#app');
-  const ok = () => state.tab === 'search' && !state.view && !state.searchFocus && !state.results && !state.q
+  const ok = () => !state.view && (state.tab !== 'search' || (!state.searchFocus && !state.results && !state.q))
+    && !(document.activeElement && document.activeElement.tagName === 'INPUT')
     && !$('#sheet').classList.contains('show') && !document.querySelector('.dialog');
   const paint = (d, anim) => {
     const a = app();
@@ -1711,12 +1734,26 @@ $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: fa
     if (mode !== 'pull') return;
     if (pull < TH) return paint(0, true);
     busy = true; ptr.classList.add('busy'); paint(56, true);
-    const t0 = Date.now();
-    if (spOn() && spLoading) await spLoading.catch(() => {});   // 先等前一次抓完，再強制重抓一次最新的
-    try { await Promise.allSettled([spOn() ? loadSpotifyHome(true) : null, sbUser ? syncNow() : null]); } catch (e) {}
+    const t0 = Date.now(), tab = state.tab;
+    // 雲端同步：如果剛好在同步，等它結束再完整同步一次
+    const sync = async () => { if (!sbUser) return; for (let i = 0; syncing && i < 40; i++) await sleep(250); await syncNow(); };
+    try {
+      if (tab === 'search') {
+        if (spOn() && spLoading) await spLoading.catch(() => {});   // 先等前一次抓完，再強制重抓一次最新的
+        await Promise.allSettled([spOn() ? loadSpotifyHome(true) : null, sync()]);
+      } else if (tab === 'artists') {
+        await sync();
+        refreshAllArtists();
+        // 等演出者作品數重抓（最多 20 秒；沒抓完的會在背景繼續，數字會自己更新）
+        for (let i = 0; (atQueue.size || atRunning) && i < 80; i++) await sleep(250);
+      } else {
+        await sync();
+      }
+    } catch (e) {}
     if (Date.now() - t0 < 500) await new Promise(r => setTimeout(r, 500 - (Date.now() - t0)));
     ptr.classList.remove('busy'); busy = false; paint(0, true);
-    if (state.tab === 'search' && !state.view && !state.results) updateSearchBody();
+    if (state.tab !== tab || state.view) return;
+    if (tab === 'search') { if (!state.results) updateSearchBody(); } else render();
   };
   document.addEventListener('touchend', end); document.addEventListener('touchcancel', end);
 })();
