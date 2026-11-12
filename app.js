@@ -312,6 +312,8 @@ async function albumTracks(spotifyId) {
 const SP_KEY = 'heard.spotify';
 const SP_SCOPES = 'user-read-currently-playing user-read-recently-played user-library-read playlist-read-private playlist-read-collaborative';
 const hasLibScope = () => /user-library-read/.test(spTok?.scope || '');
+// 缺少的權限（收藏與歌單都要）：缺了就在設定頁顯示「重新連結」
+const missingScopes = () => SP_SCOPES.split(' ').filter(x => !(spTok?.scope || '').split(' ').includes(x));
 let spTok = (() => { try { return JSON.parse(localStorage.getItem(SP_KEY)); } catch (e) { return null; } })();
 const spOn = () => !!(CFG.SPOTIFY_CLIENT_ID && spTok?.refresh);
 const spRedirect = () => location.origin + location.pathname.replace(/index\.html$/, '');
@@ -327,7 +329,8 @@ async function spotifyLogin() {
   localStorage.setItem('heard.pkce', JSON.stringify({ verifier, st }));
   location.href = 'https://accounts.spotify.com/authorize?' + new URLSearchParams({
     client_id: CFG.SPOTIFY_CLIENT_ID, response_type: 'code', redirect_uri: spRedirect(),
-    code_challenge_method: 'S256', code_challenge: challenge, scope: SP_SCOPES, state: st
+    code_challenge_method: 'S256', code_challenge: challenge, scope: SP_SCOPES, state: st,
+    show_dialog: 'true'          // 一定顯示授權畫面，新增的權限（例如歌單）才會被同意
   });
 }
 async function spTokenReq(body) {
@@ -549,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v70';
+const APP_VER = 'v71';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1440,6 +1443,7 @@ function paintSaved() {
 // 自己建立或共同編輯的歌單（Spotify 只開放這些歌單的內容）；歌單沒變（snapshot 相同）就不重抓
 function loadPlaylists(force) {
   if (plLoading) return plLoading;
+  if (!/playlist-read-private/.test(spTok?.scope || '')) { libDiag.plErr = '權限不足：Spotify 沒有給 playlist-read-private'; return Promise.resolve(); }
   if (!force && Date.now() - plIndex.at < 10 * 60e3) return Promise.resolve();
   return plLoading = (async () => {
     const me = await sp('/me');
@@ -1532,7 +1536,7 @@ function openMenu() {
         ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>`;
   const spBlock = !CFG.SPOTIFY_CLIENT_ID ? '<div class="muted small">尚未設定 Spotify（見 SETUP.md）</div>'
     : spOn() ? `<div class="panel row-between"><span>✓ 已連結 Spotify</span><button class="btn sm" data-act="spLogout">中斷連結</button></div>
-      ${hasLibScope() ? '' : '<button class="btn sm primary" style="margin-top:10px" data-act="spLogin">重新連結 Spotify 以顯示收藏的歌曲</button>'}
+      ${missingScopes().length ? '<button class="btn sm primary" style="margin-top:10px" data-act="spLogin">重新連結 Spotify 以顯示收藏的歌曲</button>' : ''}
       <button class="btn sm" style="margin-top:10px" data-act="copyDiag">複製診斷資料</button><div class="muted small" style="margin-top:8px">版本 ${APP_VER}</div>
       <details class="diag"><summary>連線診斷（最近 ${spLog.length} 次請求）</summary>${spLog.map(x => `<div class="diag-row ${x.ok ? '' : 'bad'}">
         <span>${new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false })}</span><code>${esc(decodeURIComponent(x.path).slice(0, 90))}</code><b>${esc(x.info)}</b></div>`).join('') || '<div class="muted small">還沒有紀錄</div>'}</details>`
