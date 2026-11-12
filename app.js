@@ -301,12 +301,13 @@ async function albumTracks(spotifyId) {
     const p = await spCached(next.replace('https://api.spotify.com/v1', ''));
     items.push(...(p?.items || [])); next = p?.next;
   }
-  return items.map(x => ({ n: x.track_number, name: x.name, ms: x.duration_ms }));
+  return items.map(x => ({ n: x.track_number, name: x.name, ms: x.duration_ms, id: x.id }));
 }
 
 /* ================= Spotify（PKCE，免後端） ================= */
 const SP_KEY = 'heard.spotify';
-const SP_SCOPES = 'user-read-currently-playing user-read-recently-played';
+const SP_SCOPES = 'user-read-currently-playing user-read-recently-played user-library-read playlist-read-private playlist-read-collaborative';
+const hasLibScope = () => /user-library-read/.test(spTok?.scope || '');
 let spTok = (() => { try { return JSON.parse(localStorage.getItem(SP_KEY)); } catch (e) { return null; } })();
 const spOn = () => !!(CFG.SPOTIFY_CLIENT_ID && spTok?.refresh);
 const spRedirect = () => location.origin + location.pathname.replace(/index\.html$/, '');
@@ -332,7 +333,7 @@ async function spTokenReq(body) {
   });
   const j = await res.json();
   if (!res.ok) throw new Error(j.error_description || j.error || res.status);
-  spTok = { access: j.access_token, refresh: j.refresh_token || spTok?.refresh, exp: Date.now() + (j.expires_in - 60) * 1000 };
+  spTok = { access: j.access_token, refresh: j.refresh_token || spTok?.refresh, exp: Date.now() + (j.expires_in - 60) * 1000, scope: j.scope ?? spTok?.scope ?? '' };
   localStorage.setItem(SP_KEY, JSON.stringify(spTok));
 }
 async function spotifyCallback() {
@@ -535,6 +536,7 @@ const I = {
   v_grid: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
   v_small: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="9.5" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><rect x="16" y="9.5" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><rect x="9.5" y="16" width="5" height="5" rx="1"/><rect x="16" y="16" width="5" height="5" rx="1"/></svg>',
   v_list: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M11 5.5h10M11 8h6M11 16.5h10M11 19h6"/></svg>',
+  savedOn: '<svg width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M7.5 12.3l3 3 6-6.3" fill="none" stroke="#121212" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   back: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m15 5-7 7 7 7"/></svg>'
 };
 const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設定">${I.gear}${syncOn() ? `<span id="syncDot" class="dot ${syncing ? 'busy' : (sbUser && !state.syncErr ? '' : 'off')}"></span>` : ''}</button>`;
@@ -542,7 +544,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v67';
+const APP_VER = 'v68';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1165,6 +1167,14 @@ async function pumpArtistTotals() {
   }
 }
 
+// 演出者列表的篩選：'undone' 未聽完、'done' 已聽完（100%）、'' 全部；存在這台裝置
+function artistDoneFilter() {
+  try {
+    const v = localStorage.getItem('heard.artistDone');
+    if (v !== null) return v;
+    return localStorage.getItem('heard.hideDoneArtists') === '1' ? 'undone' : '';   // 舊設定
+  } catch (e) { return ''; }
+}
 function renderArtists(app) {
   const map = new Map();
   // 規則：封存的專輯不會讓演出者出現在演出者列表（但演出者已在列表時，封存仍算進進度）
@@ -1177,15 +1187,15 @@ function renderArtists(app) {
   followed.forEach(f => { const k = norm(f.name); if (!map.has(k)) map.set(k, { id: f.id || '', name: f.name, heard: [] }); else if (!map.get(k).id && f.id) map.get(k).id = f.id; });
   const all = [...map.values()];
   all.forEach(x => { x.pg = artistProgress(x.name); });
-  const hideDone = (() => { try { return localStorage.getItem('heard.hideDoneArtists') === '1'; } catch (e) { return false; } })();
-  let list = hideDone ? all.filter(x => !(x.pg && x.pg.pct >= 100)) : all;
+  const df = artistDoneFilter(), isDone100 = x => !!(x.pg && x.pg.pct >= 100);
+  let list = df === 'undone' ? all.filter(x => !isDone100(x)) : df === 'done' ? all.filter(isDone100) : all;
   if (state.artQ) { const q = state.artQ.toLowerCase(); list = list.filter(x => x.name.toLowerCase().includes(q)); }
   const so = sortOf('artists'), sdef = ARTIST_SORTS[so.key];
   list.sort((a, b) => { const r = sdef.cmp(a, b) || colStroke.compare(a.name, b.name); return so.desc ? -r : r; });
   app.innerHTML = `
     <div class="home-head"><header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者</div>` : ''}</div>${gearBtn()}</header></div>
     ${all.length ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="aq" type="search" placeholder="在演出者裡搜尋" value="${esc(state.artQ)}"></div></div>` : ''}
-    ${all.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip${hideDone ? ' on' : ''}" data-act="hideDone">未聽完</button></div>` : ''}
+    ${all.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip${df === 'undone' ? ' on' : ''}" data-act="doneFilter" data-v="undone">未聽完</button><button class="chip${df === 'done' ? ' on' : ''}" data-act="doneFilter" data-v="done">已聽完</button></div>` : ''}
     ${all.length ? `<div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
       <div style="display:flex;gap:6px">${viewBtn('artists', ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
@@ -1210,7 +1220,7 @@ function renderArtists(app) {
           ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
         <span class="muted">›</span></button>`;
     }).join('')}</div>`
-    : state.artQ ? '<div class="empty">沒有符合的演出者</div>' : all.length ? '<div class="empty">所有演出者都聽完了</div>' : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
+    : state.artQ ? '<div class="empty">沒有符合的演出者</div>' : all.length ? `<div class="empty">${df === 'done' ? '還沒有聽完的演出者' : '所有演出者都聽完了'}</div>` : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
   const aq = $('#aq'); if (aq) aq.oninput = e => { state.artQ = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#aq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
 
@@ -1348,6 +1358,7 @@ async function loadTracks(k) {
     }
     const s = seen.get(k); if (s) s._tracks = t; else seen.set(k, { ...a, _tracks: t });
     if (state.current === k) afterSheetOpen(() => applyTracks(k));
+    checkSaved(t);
   } catch (e) {
     const s = seen.get(k); if (s && !s._tracks) { s._tracks = []; if (state.current === k) afterSheetOpen(() => applyTracks(k)); }
   }
@@ -1368,7 +1379,7 @@ function metaHTML(a, tracks) {
 }
 function tracksHTML(tracks) {
   const fmt = ms => ms ? `${Math.floor(ms / 60000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}` : '';
-  return (tracks || []).map(t => `<div><span>${t.n}</span><b style="flex:1;font-weight:400">${esc(t.name)}</b><em class="muted small" style="font-style:normal">${fmt(t.ms)}</em></div>`).join('');
+  return (tracks || []).map(t => `<div${t.id ? ` data-tid="${t.id}"` : ''}><span>${t.n}</span><b style="flex:1;font-weight:400">${esc(t.name)}</b><i class="saved-ic${savedTracks.get(t.id) ? ' on' : ''}">${I.savedOn}</i><em class="muted small" style="font-style:normal">${fmt(t.ms)}</em></div>`).join('');
 }
 // 曲目載入完成：只更新資訊列與曲目區，面板其他部分（封面、按鈕）不重建
 function applyTracks(k) {
@@ -1379,6 +1390,64 @@ function applyTracks(k) {
   const img = $('#sheet .detail-cover img'); if (img && a.cover && img.getAttribute('src') !== a.cover) img.src = a.cover;
   const t = $('#sheetTracks');
   if (t && tracks?.length && !t.childElementCount) { t.innerHTML = tracksHTML(tracks); void t.offsetHeight; t.classList.add('in'); }
+  paintSaved();
+}
+
+/* ---------- 收藏的歌曲：跟原生 Spotify 一樣，存在「已按讚的歌曲」或自己的歌單裡就打勾（只讀，不會改動 Spotify） ---------- */
+const savedTracks = new Map();          // 歌曲 id → 是否已收藏
+const PL_KEY = 'heard.plIndex';
+let plIndex = (() => { try { return JSON.parse(localStorage.getItem(PL_KEY)) || { at: 0, pl: {} }; } catch (e) { return { at: 0, pl: {} }; } })();
+let plSet = new Set(Object.values(plIndex.pl).flatMap(p => p.ids || []));
+let plLoading = null;
+function paintSaved() {
+  document.querySelectorAll('#sheetTracks [data-tid]').forEach(r => r.querySelector('.saved-ic')?.classList.toggle('on', !!savedTracks.get(r.dataset.tid)));
+}
+// 自己建立或共同編輯的歌單（Spotify 只開放這些歌單的內容）；歌單沒變（snapshot 相同）就不重抓
+function loadPlaylists(force) {
+  if (plLoading) return plLoading;
+  if (!force && Date.now() - plIndex.at < 10 * 60e3) return Promise.resolve();
+  return plLoading = (async () => {
+    const me = await sp('/me');
+    const lists = [];
+    for (let url = '/me/playlists?limit=50'; url && lists.length < 500;) {
+      const j = await sp(url); lists.push(...(j?.items || []).filter(Boolean));
+      url = j?.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
+    }
+    const next = {};
+    for (const p of lists) {
+      if (p.owner?.id !== me?.id && !p.collaborative) continue;
+      const old = plIndex.pl[p.id];
+      if (old && old.snap === p.snapshot_id) { next[p.id] = old; continue; }
+      const ids = [];
+      for (let url = `/playlists/${p.id}/items?limit=50`; url && ids.length < 5000;) {
+        const j = await sp(url);
+        (j?.items || []).forEach(it => { const tr = it?.item || it?.track; if (tr?.id) ids.push(tr.id); });
+        url = j?.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
+        await sleep(120);
+      }
+      next[p.id] = { snap: p.snapshot_id, ids };
+    }
+    plIndex = { at: Date.now(), pl: next };
+    plSet = new Set(Object.values(next).flatMap(p => p.ids));
+    try { localStorage.setItem(PL_KEY, JSON.stringify(plIndex)); } catch (e) {}
+  })().catch(e => console.warn('playlists', e)).finally(() => { plLoading = null; });
+}
+async function checkSaved(tracks) {
+  if (!spOn() || !hasLibScope()) return;
+  const ids = (tracks || []).map(t => t.id).filter(Boolean);
+  if (!ids.length) return;
+  const mark = () => { ids.forEach(id => { if (plSet.has(id)) savedTracks.set(id, true); }); paintSaved(); };
+  mark();                                   // 先用已知的歌單資料
+  try {
+    for (let i = 0; i < ids.length; i += 40) {
+      const part = ids.slice(i, i + 40);
+      const r = await sp('/me/library/contains?uris=' + part.map(id => 'spotify:track:' + id).join(','));
+      if (Array.isArray(r)) part.forEach((id, n) => savedTracks.set(id, !!r[n] || plSet.has(id)));
+    }
+  } catch (e) {}
+  mark();
+  await loadPlaylists();
+  mark();
 }
 function renderSheet() {
   const k = state.current; const saved = db.albums[k]; const a = saved || seen.get(k); if (!a) return;
@@ -1424,6 +1493,7 @@ function openMenu() {
         ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>`;
   const spBlock = !CFG.SPOTIFY_CLIENT_ID ? '<div class="muted small">尚未設定 Spotify（見 SETUP.md）</div>'
     : spOn() ? `<div class="panel row-between"><span>✓ 已連結 Spotify</span><button class="btn sm" data-act="spLogout">中斷連結</button></div>
+      ${hasLibScope() ? '' : '<button class="btn sm primary" style="margin-top:10px" data-act="spLogin">重新連結 Spotify 以顯示收藏的歌曲</button>'}
       <button class="btn sm" style="margin-top:10px" data-act="copyDiag">複製診斷資料</button><div class="muted small" style="margin-top:8px">版本 ${APP_VER}</div>
       <details class="diag"><summary>連線診斷（最近 ${spLog.length} 次請求）</summary>${spLog.map(x => `<div class="diag-row ${x.ok ? '' : 'bad'}">
         <span>${new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false })}</span><code>${esc(decodeURIComponent(x.path).slice(0, 90))}</code><b>${esc(x.info)}</b></div>`).join('') || '<div class="muted small">還沒有紀錄</div>'}</details>`
@@ -1564,7 +1634,7 @@ document.addEventListener('click', async e => {
       catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
       return;
     }
-    case 'hideDone': { let on = false; try { on = localStorage.getItem('heard.hideDoneArtists') === '1'; localStorage.setItem('heard.hideDoneArtists', on ? '0' : '1'); } catch (e) {} return render(); }
+    case 'doneFilter': { const v = artistDoneFilter() === d.v ? '' : d.v; try { localStorage.setItem('heard.artistDone', v); } catch (e) {} return render(); }
     case 'follow': {
       const v = state.view; if (!v) return;
       const hasMarks = myAlbums().some(a => norm(a.artist) === norm(v.name) && a.status !== 'archived');
