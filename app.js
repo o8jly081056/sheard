@@ -316,6 +316,14 @@ const hasLibScope = () => /user-library-read/.test(spTok?.scope || '');
 // 缺少的權限（收藏與歌單都要）：缺了就在設定頁顯示「重新連結」
 const missingScopes = () => SP_SCOPES.split(' ').filter(x => !(spTok?.scope || '').split(' ').includes(x));
 let spTok = (() => { try { return JSON.parse(localStorage.getItem(SP_KEY)); } catch (e) { return null; } })();
+// 換了 Spotify Client ID（例如舊 App 被限流、改用新 App）：舊的登入和冷卻紀錄都作廢，要重新連結
+const spClientChanged = (() => {
+  const prev = localStorage.getItem('heard.spClient'), cur = CFG.SPOTIFY_CLIENT_ID || '';
+  localStorage.setItem('heard.spClient', cur);
+  if (prev === null || prev === cur) return false;
+  spTok = null; localStorage.removeItem(SP_KEY); localStorage.removeItem('heard.spCool');
+  return true;
+})();
 const spOn = () => !!(CFG.SPOTIFY_CLIENT_ID && spTok?.refresh);
 const spRedirect = () => location.origin + location.pathname.replace(/index\.html$/, '');
 const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -554,7 +562,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v82';
+const APP_VER = 'v83';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1926,6 +1934,7 @@ async function quickNowPlaying() {
 (async () => {
   purgeWant(); migrateKeys(); save();
   await spotifyCallback();
+  if (spClientChanged && !spTok) toast('已換成新的 Spotify App，請到設定重新連結 Spotify');
   const wantNp = new URLSearchParams(location.search).has('np');
   if (wantNp) history.replaceState(null, '', spRedirect());
   render();
