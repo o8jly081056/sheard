@@ -207,6 +207,7 @@ async function searchArtistsTop(q) {
 }
 const isFresh = path => !(freshKeys.size && forceFresh(path)) && (cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path)));
 let discBusy = 0;
+const artistLoads = [];   // 診斷用：最近幾次打開演出者頁的結果
 // 抓演出者在 Spotify 上的全部作品（專輯、單曲和迷你專輯；不含參與的專輯與合輯）
 // 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
 // 回傳陣列；沒抓完時陣列帶 incomplete=true 與 err
@@ -552,7 +553,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v80';
+const APP_VER = 'v81';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1293,11 +1294,14 @@ async function renderArtist(app) {
       const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
       if (v.err && cw) setTimeout(() => { if (state.view === v) { delete v.albums; delete v.err; v.cached = false; render(); } }, cw * 1000 + 300);
     };
+    const rec = { name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), idIn: v.id || '', id: '', n: null, err: '' };
+    artistLoads.unshift(rec); artistLoads.length = Math.min(artistLoads.length, 8);
     try {
-      if (!spOn()) v.albums = [];
+      if (!spOn()) { v.albums = []; rec.err = '未連結 Spotify'; }
       else {
         if (!isSpId(v.id)) v.id = await resolveArtistId(v.name);
-        if (!v.id) v.albums = [];
+        rec.id = v.id || '';
+        if (!v.id) { v.albums = Object.assign([], { incomplete: true, err: '在 Spotify 找不到這位演出者' }); v.err = v.albums.err; rec.err = v.err; }
         else {
           v.loading = true;
           const list = await artistAlbums(v.id, v.name, part => {
@@ -1305,10 +1309,10 @@ async function renderArtist(app) {
             const first = !v.albums; v.albums = part;
             if (first || !$('#sheet.show')) render();
           });
-          done(list);
+          done(list); rec.n = list.length; rec.err = list.err || '';
         }
       }
-    } catch (e) { done(Object.assign([], { incomplete: true, err: e.message || '載入失敗' })); }
+    } catch (e) { done(Object.assign([], { incomplete: true, err: e.message || '載入失敗' })); rec.err = e.message || '載入失敗'; }
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached && !v.loading && !v.err) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
@@ -1684,7 +1688,7 @@ document.addEventListener('click', async e => {
     case 'copyDiag': {
       const txt = JSON.stringify({ v: 'diag3', app: APP_VER, disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
         tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES, granted: spTok?.scope ?? '(未記錄，需重新連結)',
-        lib: { ...libDiag, playlists: Object.keys(plIndex.pl).length, plTracks: plSet.size, plAt: plIndex.at ? new Date(plIndex.at).toLocaleString('zh-TW', { hour12: false }) : null }, refresh: refreshLog,
+        lib: { ...libDiag, playlists: Object.keys(plIndex.pl).length, plTracks: plSet.size, plAt: plIndex.at ? new Date(plIndex.at).toLocaleString('zh-TW', { hour12: false }) : null }, refresh: refreshLog, artistLoads,
         log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
       try { await navigator.clipboard.writeText(txt); toast('已複製，貼給 Claude 就好'); }
       catch (err) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已複製，貼給 Claude 就好'); }
