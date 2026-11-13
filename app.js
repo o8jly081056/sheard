@@ -552,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v77';
+const APP_VER = 'v78';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -673,7 +673,10 @@ function applyRemoteRecentSearches(items, ts) {
 const FA_KEY = 'heard.followed', FA_AT = 'heard.followedAt', META_FA = '__meta:followedArtists';
 let followed = (() => { try { return JSON.parse(localStorage.getItem(FA_KEY)) || []; } catch (e) { return []; } })();
 let followedAt = +(localStorage.getItem(FA_AT) || 0);
-const isFollowed = name => followed.some(x => norm(x.name) === norm(name));
+// followed 裡 hidden:true 的是「移除的演出者」：不出現在演出者列表，但已聽過／封存的標記全部保留
+const isFollowed = name => followed.some(x => norm(x.name) === norm(name) && !x.hidden);
+const isHiddenArtist = name => followed.some(x => norm(x.name) === norm(name) && x.hidden);
+const inArtistList = name => !isHiddenArtist(name) && (isFollowed(name) || myAlbums().some(a => norm(a.artist) === norm(name) && a.status !== 'archived'));
 function saveFollowed() {
   followedAt = Date.now();
   try { localStorage.setItem(FA_KEY, JSON.stringify(followed)); localStorage.setItem(FA_AT, String(followedAt)); } catch (e) {}
@@ -685,7 +688,7 @@ function applyRemoteFollowed(items, ts) {
 }
 function setFollow(name, id, on) {
   followed = followed.filter(x => norm(x.name) !== norm(name));
-  if (on) followed.unshift({ name, id: id || '', at: Date.now() });
+  followed.unshift(on ? { name, id: id || '', at: Date.now() } : { name, id: id || '', at: Date.now(), hidden: true });
   saveFollowed();
 }
 function addRecentSearch(item) {
@@ -1188,8 +1191,8 @@ async function pumpArtistTotals() {
 // 演出者列表上的所有演出者名字（規則同 renderArtists）
 function listedArtists() {
   const m = new Map();
-  myAlbums().filter(a => a.status !== 'archived').forEach(a => m.set(norm(a.artist), a.artist));
-  followed.forEach(f => { if (!m.has(norm(f.name))) m.set(norm(f.name), f.name); });
+  myAlbums().filter(a => a.status !== 'archived' && !isHiddenArtist(a.artist)).forEach(a => m.set(norm(a.artist), a.artist));
+  followed.filter(f => !f.hidden).forEach(f => { if (!m.has(norm(f.name))) m.set(norm(f.name), f.name); });
   return [...m.values()];
 }
 // 下拉重新整理演出者列表：每位演出者都不用快取、重新向 Spotify 抓完整作品數
@@ -1215,13 +1218,13 @@ function artistDoneFilter() {
 function renderArtists(app) {
   const map = new Map();
   // 規則：封存的專輯不會讓演出者出現在演出者列表（但演出者已在列表時，封存仍算進進度）
-  myAlbums().filter(a => a.status !== 'archived').forEach(a => {
+  myAlbums().filter(a => a.status !== 'archived' && !isHiddenArtist(a.artist)).forEach(a => {
     const k = norm(a.artist);
     if (!map.has(k)) map.set(k, { id: '', name: a.artist, heard: [] });
     const g = map.get(k); if (a.artistId) g.id = a.artistId;   // 與 rowArtistId 規則相同
     g.heard.push(a);
   });
-  followed.forEach(f => { const k = norm(f.name); if (!map.has(k)) map.set(k, { id: f.id || '', name: f.name, heard: [] }); else if (!map.get(k).id && f.id) map.get(k).id = f.id; });
+  followed.filter(f => !f.hidden).forEach(f => { const k = norm(f.name); if (!map.has(k)) map.set(k, { id: f.id || '', name: f.name, heard: [] }); else if (!map.get(k).id && f.id) map.get(k).id = f.id; });
   const all = [...map.values()];
   all.forEach(x => { x.pg = artistProgress(x.name); });
   const df = artistDoneFilter(), isDone100 = x => !!(x.pg && x.pg.pct >= 100);
@@ -1327,7 +1330,7 @@ async function renderArtist(app) {
       <div style="flex:1;min-width:0"><h2>${esc(v.name)}</h2>
         <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張</span><b style="font-size:18px">${pct}%</b></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
-        ${(() => { const inList = isFollowed(v.name) || local.some(a => a.status !== 'archived');
+        ${(() => { const inList = inArtistList(v.name);
           return `<button class="follow-btn${inList ? ' on' : ''}" data-act="follow">${inList ? '已加入' : '加入'}</button>`; })()}
       </div>
     </div>
@@ -1682,12 +1685,10 @@ document.addEventListener('click', async e => {
     case 'doneFilter': { try { localStorage.setItem('heard.artistDone', d.v || ''); } catch (e) {} return render(); }
     case 'follow': {
       const v = state.view; if (!v) return;
-      const hasMarks = myAlbums().some(a => norm(a.artist) === norm(v.name) && a.status !== 'archived');
-      // 已加入 → 移除（一定先跳確認）：有已聽過的專輯就連標記一起刪；只是加入的就只取消加入
-      if (hasMarks) return deleteArtist(v.name);
-      if (isFollowed(v.name)) {
-        ask({ title: `移除「${v.name}」？`, msg: '會從演出者列表移除這位演出者。', ok: '移除', cancel: '取消' })
-          .then(ok => { if (!ok) return; setFollow(v.name, v.id, false); render(); toast(`已移除「${v.name}」`); });
+      // 已加入 → 移除（一定先跳確認）：只從演出者列表拿掉，已聽過／封存的標記全部保留
+      if (inArtistList(v.name)) {
+        ask({ title: `移除「${v.name}」？`, msg: '會從演出者列表移除，已聽過和封存的標記會保留。', ok: '移除', cancel: '取消' })
+          .then(ok => { if (!ok) return; setFollow(v.name, isSpId(v.id) ? v.id : '', false); render(); toast(`已移除「${v.name}」`); });
         return;
       }
       setFollow(v.name, isSpId(v.id) ? v.id : '', true); toast(`已加入「${v.name}」`);
