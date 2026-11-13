@@ -381,6 +381,7 @@ const COOL_KEY = 'heard.spCool';
 // Spotify 會只擋某一類端點（例如演出者作品被擋、搜尋和最近播放正常），所以冷卻分開記：artists / search / me / albums
 const bucketOf = path => (path.split(/[/?]/)[1] || '');
 const spCool = (() => { try { const c = JSON.parse(localStorage.getItem(COOL_KEY)) || {}; return c.until !== undefined ? {} : c; } catch (e) { return {}; } })();
+Object.values(spCool).forEach(c => { if (c && c.until > Date.now() + 1200e3) c.until = Date.now() + 1200e3; });   // 舊版最多等 60 分鐘，改成 20 分鐘
 const saveCool = () => { try { localStorage.setItem(COOL_KEY, JSON.stringify(spCool)); } catch (e) {} };
 const cooldownLeft = b => {
   const left = x => Math.max(0, Math.ceil(((x?.until || 0) - Date.now()) / 1000));
@@ -405,7 +406,7 @@ async function spRaw(path, retry = true) {
     let reason = ''; try { reason = (await res.json())?.reason || ''; } catch (e) {}
     const ra = +(res.headers.get('Retry-After') || 0);
     cb.strikes++;
-    const backoff = Math.min(3600, 30 * Math.pow(4, cb.strikes - 1));
+    const backoff = Math.min(1200, 30 * Math.pow(4, cb.strikes - 1));   // 最多等 20 分鐘
     const wait = Math.max(ra, backoff, reason === 'QUOTA_EXCEEDED' ? 600 : 0);
     cb.until = Date.now() + wait * 1000; saveCool();
     throw new Error((reason === 'QUOTA_EXCEEDED' ? '已達 Spotify 用量上限' : 'Spotify 暫時限制請求') + `，約 ${fmtWait(wait)}後自動恢復（${bk}，第 ${cb.strikes} 次）`);
@@ -553,7 +554,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v81';
+const APP_VER = 'v82';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1136,7 +1137,9 @@ const atStale = c => !c || Date.now() - c.at > (c.src === 'search' ? 6 * 36e5 : 
 const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
-  artistTotals[norm(name)] = { id, keys: albums.map(albumKey), at: Date.now(), src: albums.src || 'api', img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
+  // list：完整作品清單也存在手機上，打開演出者頁直接顯示、Spotify 限流時也看得到
+  const list = albums.map(({ id: aid, spotifyId, title, artist, artistId, date, type, year, tracks, cover }) => ({ id: aid, spotifyId, title, artist, artistId, date, type, year, tracks, cover }));
+  artistTotals[norm(name)] = { id, keys: albums.map(albumKey), list, at: Date.now(), src: albums.src || 'api', img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
 }
 // 演出者列表與演出者頁共用：同一位演出者用同一個 Spotify id、同一套算法，數字才會一致
@@ -1186,7 +1189,7 @@ async function pumpArtistTotals() {
         artRefresh.done++;
         if (artRefresh.done >= artRefresh.total || (!atQueue.size && !atRunning)) {
           refreshLog.unshift({ tab: 'artists-bg', at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), ms: Date.now() - artRefresh.t0, n: artRefresh.total });
-          toast(`已重新整理 ${artRefresh.total} 位演出者`); artRefresh = null;
+          toast(`已重新整理 ${artRefresh.total} 位演出者${artRefresh.skipped ? `（${artRefresh.skipped} 位一小時內已更新）` : ''}`); artRefresh = null;
         }
       }
       clearTimeout(atRenderT);
@@ -1209,8 +1212,10 @@ let artRefresh = null;                  // 下拉重整演出者的進度 { tota
 const refreshLog = [];                  // 診斷用：最近幾次下拉重整花多久、結果
 function refreshAllArtists() {
   if (!spOn()) return 0;
-  const names = listedArtists();
-  artRefresh = names.length ? { total: names.length, done: 0, t0: Date.now() } : null;
+  // 一小時內已經更新過的就不重抓，避免一直下拉把 Spotify 的請求額度用完（會被限流很久）
+  const all = listedArtists();
+  const names = all.filter(n => Date.now() - (artistTotals[norm(n)]?.at || 0) > 36e5);
+  artRefresh = names.length ? { total: names.length, done: 0, t0: Date.now(), skipped: all.length - names.length } : null;
   names.forEach(n => { freshKeys.add(n); freshKeys.add(encodeURIComponent(n)); atQueue.add(n); });
   atLimit = atDone + names.length; atGap = 1500;
   pumpArtistTotals();
@@ -1279,6 +1284,16 @@ const AF_KEY = 'heard.artistFilter';
 const loadArtistFilter = () => { try { return JSON.parse(localStorage.getItem(AF_KEY)) || {}; } catch (e) { return {}; } };
 function saveArtistFilter(v) { try { localStorage.setItem(AF_KEY, JSON.stringify({ filter: v.filter || null, unheard: !!v.unheard })); } catch (e) {} }
 try { localStorage.removeItem('heard.artistFilters'); } catch (e) {}
+// 背景更新演出者作品：抓完整了才換掉畫面上的清單，失敗就保留手機上的
+async function bgRefreshArtist(v) {
+  v.loading = true;
+  try {
+    const list = await artistAlbums(v.id, v.name);
+    if (list.length && !list.incomplete) { setArtistTotal(v.name, v.id, list); if (state.view === v) v.albums = list; }
+  } catch (e) {}
+  v.loading = false;
+  if (state.view === v && !$('#sheet.show')) render();
+}
 async function renderArtist(app) {
   const v = state.view;
   if (!('unheard' in v)) {
@@ -1287,7 +1302,17 @@ async function renderArtist(app) {
   }
   const head = `<div class="backbar"><button class="back" data-act="back">${I.back}返回</button></div>`;
   const local = myAlbums().filter(a => norm(a.artist) === norm(v.name));
+  const ac = artistTotals[norm(v.name)];
+  if (!v.albums && !v.fresh && ac?.list?.length) {
+    // 手機上有這位演出者的作品清單：直接顯示；過期了才在背景向 Spotify 更新（限流中就先不抓）
+    v.albums = remember(ac.list.map(x => ({ ...x }))); v.cached = true;
+    if (!isSpId(v.id) && isSpId(ac.id)) v.id = ac.id;
+    artistLoads.unshift({ name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), from: 'cache', n: v.albums.length, age: Math.round((Date.now() - ac.at) / 60000) + ' 分鐘前' });
+    artistLoads.length = Math.min(artistLoads.length, 8);
+    if (atStale(ac) && spOn() && isSpId(v.id) && !cooldownLeft('artists')) bgRefreshArtist(v);
+  }
   if (!v.albums) {
+    v.fresh = false;
     app.innerHTML = `${head}<h2 style="margin:4px 0">${esc(v.name)}</h2><div class="spinner"></div>`;
     const done = list => {
       v.loading = false; v.albums = list; v.err = list.incomplete ? list.err : '';
@@ -1316,7 +1341,7 @@ async function renderArtist(app) {
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached && !v.loading && !v.err) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
-  if (v.img === undefined && spOn() && isSpId(v.id)) {
+  if (v.img === undefined && spOn() && isSpId(v.id) && !cooldownLeft('artists') && !cooldownLeft('search')) {
     v.img = artistTotals[norm(v.name)]?.img || null;
     artistImage(v.id, v.name).then(img => {
       v.img = img || '';
@@ -1707,7 +1732,7 @@ document.addEventListener('click', async e => {
       return render();
     }
     case 'unheardToggle': if (state.view) { state.view.unheard = !state.view.unheard; saveArtistFilter(state.view); } return render();
-    case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; } return render();
+    case 'artistRetry': if (state.view) { delete state.view.albums; delete state.view.err; state.view.cached = false; state.view.fresh = true; } return render();
     case 'searchCancel': return endSearch();
     case 'clearRecent': recentSearches = []; saveRecentSearches(); return updateSearchBody();
     case 'viewToggle': { const st = d.st; db.settings.view ??= {}; db.settings.view[st] = viewOf(st) === 'list' ? 'grid' : 'list'; save(); return render(); }
@@ -1783,7 +1808,8 @@ $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: fa
       } else if (tab === 'artists') {
         await sync();
         n = refreshAllArtists();   // 每位演出者在背景一位一位重抓，標題下方顯示進度，全部完成會提示
-        msg = n ? '' : syncMsg();
+        const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
+        msg = cw ? `Spotify 暫時限制請求，約 ${fmtWait(cw)}後自動恢復` : n ? '' : '演出者都在一小時內更新過了';
       } else {
         await sync();
         msg = syncMsg();
