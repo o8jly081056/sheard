@@ -552,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v78';
+const APP_VER = 'v79';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1007,9 +1007,17 @@ function goBack() {
   state.view = null; render(); window.scrollTo(0, y);
 }
 const TAB_ORDER = ['search', 'artists', 'heard'];
+// 每個 tab 記住自己停在哪：所在的頁面（例如某位演出者）、捲動位置、返回時要露出的上一頁
+// 切到別的 tab 再切回來會回到原處；在目前的 tab 再點一次才回到該 tab 的最上層
+const tabMem = {};
 function switchTab(t) {
-  if (t !== state.tab) { state.libQ = ''; state.artQ = ''; state.searchFocus = false; }
-  state.tab = t; state.view = null; window.scrollTo(0, 0); render();
+  state.searchFocus = false;
+  if (t === state.tab) { state.view = null; window.scrollTo(0, 0); render(); return; }
+  tabMem[state.tab] = { view: state.view, y: pageY(), snap: baseSnap, baseY };
+  const m = tabMem[t];
+  state.tab = t; state.view = m?.view || null;
+  baseSnap = m?.snap || null; baseY = m?.baseY || 0; viewShown = !!state.view;
+  render(); window.scrollTo(0, m?.y || 0);
 }
 // 左右滑手勢（整個畫面都能滑，不限邊緣）：
 // - 在演出者頁／封存頁：往右滑返回上一頁，頁面跟著手指，底下露出上一頁
