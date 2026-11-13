@@ -552,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v76';
+const APP_VER = 'v77';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1310,17 +1310,16 @@ async function renderArtist(app) {
       if (av && img) av.innerHTML = `<img src="${esc(img)}" alt="">`;
     }).catch(() => { v.img = ''; });
   }
-  const st = statsFor(v.name, v.albums.map(albumKey));
+  // 進度一律用跟演出者列表同一份資料（artistTotals）算，兩邊的進度條才會一樣；
+  // 還沒有完整作品清單時才用目前頁面上抓到的作品
+  const st = artistProgress(v.name) || statsFor(v.name, v.albums.map(albumKey));
   const keys = new Set(v.albums.map(albumKey));
   const own = remember([...v.albums, ...local.filter(a => !keys.has(albumKey(a)))]);
   const ARTIST_OPTS = RELEASES;
   const all = own.filter(a => inGroup(a, v.filter));
   const groups = v.filter ? [[v.filter, ARTIST_OPTS.find(o => o[0] === v.filter)[1]]] : RELEASES;
-  const counted = all;
-  // 沒有篩選時直接用共用算法（跟演出者列表一致）；有篩選時算該分類
-  const heard = v.filter ? counted.filter(a => isDone(statusOf(albumKey(a)))).length : st.heard;
-  const totalN = v.filter ? counted.length : st.total;
-  const pct = totalN ? Math.round(heard / totalN * 100) : 0;
+  // 上方的進度條不受篩選影響，永遠跟演出者列表一致（分類的進度看各區塊標題）
+  const heard = st.heard, totalN = st.total, pct = st.pct;
   const cover = v.img || all.find(a => a.cover)?.cover;
   app.innerHTML = `${head}
     <div class="artist-hero">
