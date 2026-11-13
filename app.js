@@ -552,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v79';
+const APP_VER = 'v80';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1244,7 +1244,7 @@ function renderArtists(app) {
   app.innerHTML = `
     <div class="home-head"><header class="top"><div><h1>演出者</h1>${all.length ? `<div class="sub">${all.length} 位演出者${artRefresh ? ` · 更新中 ${artRefresh.done}/${artRefresh.total}` : ''}</div>` : ''}</div>${gearBtn()}</header></div>
     ${all.length ? `<div class="search-row" style="padding-bottom:10px"><div class="search">${I.search}<input id="aq" type="search" placeholder="在演出者裡搜尋" value="${esc(state.artQ)}"></div></div>` : ''}
-    ${all.length ? `${chipBar('done', [['undone', '未聽完'], ['done', '已聽完']], df || null, 'margin-bottom:10px')}` : ''}
+    ${all.length ? `${chipBar('done', [['done', '已聽完'], ['undone', '未聽完']], df || null, 'margin-bottom:10px')}` : ''}
     ${all.length ? `<div class="row-between" style="margin-bottom:12px">
       <button class="sort-btn" data-act="sortMenu">${I.sort}<span>${sdef.label()}</span></button>
       <div style="display:flex;gap:6px">${viewBtn('artists', ' style="width:34px;height:34px"')}<button class="icon-btn" data-act="sortFlip" aria-label="反轉順序" style="width:34px;height:34px">${I.flip}</button></div>
