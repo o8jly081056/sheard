@@ -417,7 +417,7 @@ async function spRaw(path, retry = true) {
     const backoff = Math.min(1200, 30 * Math.pow(4, cb.strikes - 1));   // 最多等 20 分鐘
     const wait = Math.max(ra, backoff, reason === 'QUOTA_EXCEEDED' ? 600 : 0);
     cb.until = Date.now() + wait * 1000; saveCool();
-    throw new Error((reason === 'QUOTA_EXCEEDED' ? '已達 Spotify 用量上限' : 'Spotify 暫時限制請求') + `，約 ${fmtWait(wait)}後自動恢復（${bk}，第 ${cb.strikes} 次）`);
+    throw new Error((reason === 'QUOTA_EXCEEDED' ? '已達 Spotify 用量上限' : 'Spotify 暫時限制請求') + `，約 ${fmtWait(wait)}後自動恢復（${bk}，第 ${cb.strikes} 次，429 retry-after=${res.headers.get('Retry-After') ?? '看不到'}${reason ? '，' + reason : ''}）`);
   }
   if (!res.ok) {
     let msg = ''; try { msg = (await res.json())?.error?.message || ''; } catch (e) {}
@@ -562,7 +562,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v84';
+const APP_VER = 'v85';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1719,7 +1719,7 @@ document.addEventListener('click', async e => {
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
     case 'copyDiag': {
-      const txt = JSON.stringify({ v: 'diag3', app: APP_VER, disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
+      const txt = JSON.stringify({ v: 'diag3', app: APP_VER, client: (CFG.SPOTIFY_CLIENT_ID || '').slice(0, 6), disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
         tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES, granted: spTok?.scope ?? '(未記錄，需重新連結)',
         lib: { ...libDiag, playlists: Object.keys(plIndex.pl).length, plTracks: plSet.size, plAt: plIndex.at ? new Date(plIndex.at).toLocaleString('zh-TW', { hour12: false }) : null }, refresh: refreshLog, artistLoads,
         log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
