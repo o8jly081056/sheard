@@ -389,7 +389,9 @@ const COOL_KEY = 'heard.spCool';
 // Spotify 會只擋某一類端點（例如演出者作品被擋、搜尋和最近播放正常），所以冷卻分開記：artists / search / me / albums
 const bucketOf = path => (path.split(/[/?]/)[1] || '');
 const spCool = (() => { try { const c = JSON.parse(localStorage.getItem(COOL_KEY)) || {}; return c.until !== undefined ? {} : c; } catch (e) { return {}; } })();
-Object.values(spCool).forEach(c => { if (c && c.until > Date.now() + 1200e3) c.until = Date.now() + 1200e3; });   // 舊版最多等 60 分鐘，改成 20 分鐘
+Object.values(spCool).forEach(c => { if (c && c.until > Date.now() + 60e3) c.until = Date.now() + 60e3; });   // 舊版自己加長到 20 分鐘，改成照 Spotify 說的秒數
+// 演出者作品或搜尋被 Spotify 擋過、還沒成功過一次：背景完全不去抓，免得處罰被延長
+const spBlocked = () => !!(spCool.artists?.strikes || spCool.search?.strikes);
 const saveCool = () => { try { localStorage.setItem(COOL_KEY, JSON.stringify(spCool)); } catch (e) {} };
 const cooldownLeft = b => {
   const left = x => Math.max(0, Math.ceil(((x?.until || 0) - Date.now()) / 1000));
@@ -406,7 +408,7 @@ async function spRaw(path, retry = true) {
   }
   // 個人資料（最近播放、正在播放）每次都要最新的，不讓瀏覽器用快取
   const res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access }, cache: path.startsWith('/me') ? 'no-store' : 'default' });
-  if (res.ok && cb.strikes) { cb.strikes = 0; saveCool(); }
+  if (res.ok && cb.strikes) { cb.strikes = 0; saveCool(); if (!spBlocked()) setTimeout(pumpArtistTotals, 5000); }   // Spotify 放行了，背景才恢復
   if (res.status === 204) return null;
   if (res.status === 401 && retry) { spTok.exp = 0; return spRaw(path, false); }
   if (res.status === 403) throw new Error('Spotify 拒絕存取：請確認你的帳號已加入開發者後台的 User Management，且 App 擁有者有 Premium');
@@ -414,8 +416,9 @@ async function spRaw(path, retry = true) {
     let reason = ''; try { reason = (await res.json())?.reason || ''; } catch (e) {}
     const ra = +(res.headers.get('Retry-After') || 0);
     cb.strikes++;
-    const backoff = Math.min(1200, 30 * Math.pow(4, cb.strikes - 1));   // 最多等 20 分鐘
-    const wait = Math.max(ra, backoff, reason === 'QUOTA_EXCEEDED' ? 600 : 0);
+    // 照 Spotify 說的秒數等；看不到 Retry-After 就等 1 分鐘（背景不會自己試，只有打開演出者頁才會試）
+    const wait = ra > 0 ? ra : reason === 'QUOTA_EXCEEDED' ? 600 : 60;
+    cb.last = { at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), path: path.slice(0, 80), ra: res.headers.get('Retry-After'), reason, wait };
     cb.until = Date.now() + wait * 1000; saveCool();
     throw new Error((reason === 'QUOTA_EXCEEDED' ? '已達 Spotify 用量上限' : 'Spotify 暫時限制請求') + `，約 ${fmtWait(wait)}後自動恢復（${bk}，第 ${cb.strikes} 次，429 retry-after=${res.headers.get('Retry-After') ?? '看不到'}${reason ? '，' + reason : ''}）`);
   }
@@ -562,7 +565,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v85';
+const APP_VER = 'v86';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1173,6 +1176,7 @@ function queueArtistTotal(name, id) {
   atQueue.add(name); pumpArtistTotals(id);
 }
 async function pumpArtistTotals() {
+  if (spBlocked()) return;            // 被擋中：等使用者打開演出者頁、成功一次後再恢復
   const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
   if (cw) { setTimeout(pumpArtistTotals, cw * 1000 + 500); return; }
   if (atDone >= atLimit) return;
@@ -1219,7 +1223,7 @@ function listedArtists() {
 let artRefresh = null;                  // 下拉重整演出者的進度 { total, done }
 const refreshLog = [];                  // 診斷用：最近幾次下拉重整花多久、結果
 function refreshAllArtists() {
-  if (!spOn()) return 0;
+  if (!spOn() || spBlocked()) return 0;
   // 一小時內已經更新過的就不重抓，避免一直下拉把 Spotify 的請求額度用完（會被限流很久）
   const all = listedArtists();
   const names = all.filter(n => Date.now() - (artistTotals[norm(n)]?.at || 0) > 36e5);
@@ -1317,7 +1321,7 @@ async function renderArtist(app) {
     if (!isSpId(v.id) && isSpId(ac.id)) v.id = ac.id;
     artistLoads.unshift({ name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), from: 'cache', n: v.albums.length, age: Math.round((Date.now() - ac.at) / 60000) + ' 分鐘前' });
     artistLoads.length = Math.min(artistLoads.length, 8);
-    if (atStale(ac) && spOn() && isSpId(v.id) && !cooldownLeft('artists')) bgRefreshArtist(v);
+    if (atStale(ac) && spOn() && isSpId(v.id) && !spBlocked()) bgRefreshArtist(v);
   }
   if (!v.albums) {
     v.fresh = false;
@@ -1719,7 +1723,7 @@ document.addEventListener('click', async e => {
     case 'clear': state.results = null; state.q = ''; return render();
     case 'menu': return openMenu();
     case 'copyDiag': {
-      const txt = JSON.stringify({ v: 'diag3', app: APP_VER, client: (CFG.SPOTIFY_CLIENT_ID || '').slice(0, 6), disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes }])),
+      const txt = JSON.stringify({ v: 'diag3', app: APP_VER, client: (CFG.SPOTIFY_CLIENT_ID || '').slice(0, 6), disc: discStats, scrolled: document.documentElement.classList.contains('scrolled'), y: pageY(), now: new Date().toISOString(), cool: Object.fromEntries(Object.entries(spCool).map(([k, x]) => [k, { left: cooldownLeft(k), strikes: x.strikes, last: x.last }])),
         tokenExpIn: spTok ? Math.round((spTok.exp - Date.now()) / 1000) : null, scopes: SP_SCOPES, granted: spTok?.scope ?? '(未記錄，需重新連結)',
         lib: { ...libDiag, playlists: Object.keys(plIndex.pl).length, plTracks: plSet.size, plAt: plIndex.at ? new Date(plIndex.at).toLocaleString('zh-TW', { hour12: false }) : null }, refresh: refreshLog, artistLoads,
         log: spLog.map(x => ({ t: new Date(x.t).toLocaleTimeString('zh-TW', { hour12: false }), p: decodeURIComponent(x.path).slice(0, 120), ok: x.ok, i: x.info })) }, null, 1);
@@ -1816,8 +1820,7 @@ $('#scrim').addEventListener('touchmove', e => e.preventDefault(), { passive: fa
       } else if (tab === 'artists') {
         await sync();
         n = refreshAllArtists();   // 每位演出者在背景一位一位重抓，標題下方顯示進度，全部完成會提示
-        const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
-        msg = cw ? `Spotify 暫時限制請求，約 ${fmtWait(cw)}後自動恢復` : n ? '' : '演出者都在一小時內更新過了';
+        msg = spBlocked() ? 'Spotify 限制中，先不重抓；打開演出者頁會自動再試' : n ? '' : '演出者都在一小時內更新過了';
       } else {
         await sync();
         msg = syncMsg();
