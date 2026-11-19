@@ -576,7 +576,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v89';
+const APP_VER = 'v90';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1981,6 +1981,7 @@ async function quickNowPlaying() {
 /* ================= 啟動 ================= */
 (async () => {
   purgeWant(); migrateKeys(); save();
+  try { screen.orientation?.lock?.('portrait').catch(() => {}); } catch (e) {}   // 支援的裝置固定直向（iPhone 的 Safari 不支援，要用控制中心的直向鎖定）
   await spotifyCallback();
   if (spClientChanged && !spTok) toast('已換成新的 Spotify App，請到設定重新連結 Spotify');
   const wantNp = new URLSearchParams(location.search).has('np');
