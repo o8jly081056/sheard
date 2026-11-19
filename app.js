@@ -429,7 +429,7 @@ async function spRaw(path, retry = true) {
     cb.strikes++;
     // 照 Spotify 說的秒數等；看不到 Retry-After 就等 1 分鐘（背景不會自己試，只有打開演出者頁才會試）
     const wait = ra > 0 ? ra : reason === 'QUOTA_EXCEEDED' ? 600 : 60;
-    cb.last = { at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), path: path.slice(0, 80), ra: res.headers.get('Retry-After'), reason, wait };
+    cb.lastT = Date.now(); cb.last = { at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), path: path.slice(0, 80), ra: res.headers.get('Retry-After'), reason, wait };
     cb.until = Date.now() + wait * 1000; saveCool();
     throw new Error((reason === 'QUOTA_EXCEEDED' ? '已達 Spotify 用量上限' : 'Spotify 暫時限制請求') + `，約 ${fmtWait(wait)}後自動恢復（${bk}，第 ${cb.strikes} 次，429 retry-after=${res.headers.get('Retry-After') ?? '看不到'}${reason ? '，' + reason : ''}）`);
   }
@@ -576,7 +576,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v90';
+const APP_VER = 'v91';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1194,15 +1194,26 @@ function artistProgress(name) {
 const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0, atLimit = 8, atGap = 6000;
 function queueArtistTotal(name, id) {
   const c = artistTotals[norm(name)];
-  if (!spOn() || atQueue.has(name) || (c && !atStale(c) && c.img !== undefined && !freshKeys.has(name))) return;
-  atQueue.add(name); pumpArtistTotals(id);
+  if (!spOn() || (c && !atStale(c) && c.img !== undefined && !freshKeys.has(name))) return;
+  if (!c?.keys?.length) {           // 還沒有進度的排最前面，而且不受每次打開的名額限制
+    if (atQueue.has(name) && atQueue.values().next().value === name) return;
+    const rest = [...atQueue].filter(n => n !== name); atQueue.clear(); atQueue.add(name); rest.forEach(n => atQueue.add(n));
+  } else if (atQueue.has(name)) return;
+  else atQueue.add(name);
+  pumpArtistTotals(id);
 }
+let pumpT = null;
+const pumpLater = ms => { clearTimeout(pumpT); pumpT = setTimeout(pumpArtistTotals, ms); };   // 只留一個計時器，不會越排越多
 async function pumpArtistTotals() {
-  if (spBlocked()) return;            // 被擋中：等使用者打開演出者頁、成功一次後再恢復
-  const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
-  if (cw) { setTimeout(pumpArtistTotals, cw * 1000 + 500); return; }
-  if (atDone >= atLimit) return;
-  if (discBusy) { setTimeout(pumpArtistTotals, atGap); return; }
+  // 被擋過：最後一次被擋超過 30 分鐘才在背景試一位（成功就恢復，又被擋就再等 30 分鐘）
+  const lastT = Math.max(spCool.artists?.lastT || 0, spCool.search?.lastT || 0);
+  if (spBlocked() && Date.now() - lastT < 18e5) { pumpLater(18e5 - (Date.now() - lastT) + 1000); return; }
+  if (spBlocked() && atRunning) return;
+  const cw = cooldownLeft('artists');
+  if (cw) { pumpLater(cw * 1000 + 500); return; }
+  const nextName = atQueue.values().next().value;
+  if (atDone >= atLimit && artistTotals[norm(nextName)]?.keys?.length) return;   // 名額只限制「已有進度、重新檢查」的
+  if (discBusy) { pumpLater(atGap); return; }
   while (atRunning < 1 && atQueue.size) {
     atDone++;
     const name = atQueue.values().next().value; atQueue.delete(name); atRunning++;
