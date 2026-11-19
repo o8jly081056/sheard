@@ -257,42 +257,13 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
         out.push(...items); st.pages++; st.api += items.length; if (off === 0) st.total = j?.total ?? null;
         if (!j?.next || !items.length) break;
         if (onPage) onPage(finish());
-        if (net) await sleep(600);
+        if (net) await sleep(1500);   // 翻頁放慢，避免短時間太多請求被 Spotify 限流
       }
       if (!apiErr && out.length) return logDisc(st, out, Object.assign(finish(), { src: 'api' }), apiErr);   // 完整清單；回傳空的才改用搜尋
     }
-    if (!name) { if (apiErr && !out.length) throw apiErr; return finish(apiErr); }
-    // 備援：搜尋。演出者作品端點被擋時改用搜尋拼出完整作品：
-    // 1. 專輯搜尋（名字、artist:名字）→ 專輯和 EP
-    // 2. 歌曲搜尋（artist:名字、名字）→ 從每首歌所屬的專輯補齊單曲（單曲在專輯搜尋裡常排很後面或搜不到）
-    // 只留演出者有這位演出者的，並排除合輯；連續 4 頁都沒有他的作品才停
-    let searchErr = null;
-    const passes = [['album', name, 400], ['album', `artist:${name}`, 400], ['track', `artist:${name}`, 500], ['track', name, 300]];
-    for (const [type, q, cap] of passes) {
-      let miss = 0;
-      for (let off = 0; off < cap; off += 10) {
-        const enc = encodeURIComponent(q);
-        const path = off ? `/search?type=${type}&limit=10&offset=${off}&q=${enc}` : `/search?type=${type}&limit=10&q=${enc}`;
-        const net = !isFresh(path);
-        let j;
-        try { j = await spCached(path); }
-        catch (e) { searchErr = e; break; }
-        const box = type === 'album' ? j?.albums : j?.tracks;
-        const items = (box?.items || []).filter(Boolean);
-        const albums = type === 'album' ? items : items.map(t => t.album).filter(Boolean);
-        const mine = albums.filter(al => al.album_type !== 'compilation' && (al.artists || []).some(x => x.id === id));
-        const seen = new Set(out.map(x => x.id)), fresh = mine.filter(al => !seen.has(al.id));
-        out.push(...fresh);
-        miss = mine.length ? 0 : miss + 1;
-        if (onPage && fresh.length) onPage(finish());
-        if (!box?.next || !items.length || miss >= 4) break;
-        if (net) await sleep(300);
-      }
-      if (searchErr && /限制|上限/.test(searchErr.message)) break;
-    }
-    if (!out.length && (searchErr || apiErr)) throw searchErr || apiErr;
-    if (searchErr && /限制|上限/.test(searchErr.message)) return finish(searchErr);
-    return logDisc(st, out, Object.assign(finish(), { src: 'search' }), apiErr || searchErr);
+    // 只用 Spotify 的演出者作品端點（跟原生 App 的分頁一樣完整）；不再用搜尋拼湊：拼出來的不完整，又會一次打很多次搜尋被限流
+    if (apiErr && !out.length) throw apiErr;
+    return finish(apiErr);
   } finally { discBusy--; }
 }
 async function resolveArtistId(name) {
@@ -576,7 +547,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v91';
+const APP_VER = 'v92';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1191,7 +1162,7 @@ function artistProgress(name) {
   const c = artistTotals[norm(name)]; if (!c) return null;
   return statsFor(name, c.keys);
 }
-const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0, atLimit = 8, atGap = 6000;
+const atQueue = new Set(); let atRunning = 0, atRenderT = null, atDone = 0, atLimit = 8, atGap = 10000;
 function queueArtistTotal(name, id) {
   const c = artistTotals[norm(name)];
   if (!spOn() || (c && !atStale(c) && c.img !== undefined && !freshKeys.has(name))) return;
@@ -1239,7 +1210,7 @@ async function pumpArtistTotals() {
       }
       clearTimeout(atRenderT);
       atRenderT = setTimeout(() => { if (state.tab === 'artists' && !state.view && !state.current) render(); }, 400);
-      if (!atQueue.size && !atRunning) atGap = 6000;
+      if (!atQueue.size && !atRunning) atGap = 10000;
       setTimeout(pumpArtistTotals, atGap);
     })();
   }
@@ -1262,7 +1233,7 @@ function refreshAllArtists() {
   const names = all.filter(n => Date.now() - (artistTotals[norm(n)]?.at || 0) > 36e5);
   artRefresh = names.length ? { total: names.length, done: 0, t0: Date.now(), skipped: all.length - names.length } : null;
   names.forEach(n => { freshKeys.add(n); freshKeys.add(encodeURIComponent(n)); atQueue.add(n); });
-  atLimit = atDone + names.length; atGap = 4000;
+  atLimit = atDone + names.length; atGap = 10000;
   pumpArtistTotals();
   return names.length;
 }
