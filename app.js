@@ -17,7 +17,9 @@ const norm = s => (s || '').toLowerCase()
 // 用「演出者名＋專輯名」當作唯一鍵，讓 Spotify、手動新增、以及舊版資料的同一張專輯對得起來
 // 單曲／EP 另外加上「|s」：同名的專輯和單曲（例如專輯「空中飛人」和單曲「空中飛人」）是兩張不同的專輯
 const isSingleType = t => t === 'Single' || t === 'EP';
-const albumKey = a => `${norm(a.artist)}|${norm(a.title)}${isSingleType(a.type) ? '|s' : ''}`;
+// 專輯名不拿掉 (Deluxe)、(Remastered) 這類版本字：正常版和 Deluxe 版跟原生 Spotify 一樣是兩張不同的專輯（v88）
+const normTitle = s => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '').trim();
+const albumKey = a => `${norm(a.artist)}|${normTitle(a.title)}${isSingleType(a.type) ? '|s' : ''}`;
 // 舊資料的單曲沒有「|s」，搬到新的鍵（雲端也會跟著更新）
 function migrateKeys() {
   const now = Date.now(); let n = 0;
@@ -565,7 +567,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v87';
+const APP_VER = 'v88';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1146,10 +1148,11 @@ const AT_KEY = 'heard.artistTotals4', AT_TTL = 3 * 864e5;
 // 用搜尋拼湊的進度可能不完整，6 小時後就重新用完整清單算
 const atStale = c => !c || Date.now() - c.at > (c.src === 'search' ? 6 * 36e5 : AT_TTL);
 const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
-// v87：舊清單可能是用過期的分頁拼出來的（會漏專輯），全部標成需要重新檢查；背景每次打開只慢慢重抓幾位
-if (!localStorage.getItem('heard.atRecheck87')) {
-  Object.values(artistTotals).forEach(c => { c.at = 0; });
-  try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); localStorage.setItem('heard.atRecheck87', '1'); } catch (e) {}
+// v87：舊清單可能是用過期的分頁拼出來的（會漏專輯）；v88：舊清單把正常版和 Deluxe 版併成一張
+// → 全部用新的專輯鍵重算，並標成需要重新檢查；背景每次打開只慢慢重抓幾位
+if (!localStorage.getItem('heard.atRecheck88')) {
+  Object.values(artistTotals).forEach(c => { c.at = 0; if (c.list?.length) c.keys = c.list.map(albumKey); });
+  try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); localStorage.setItem('heard.atRecheck88', '1'); } catch (e) {}
 }
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
