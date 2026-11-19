@@ -19,7 +19,8 @@ const norm = s => (s || '').toLowerCase()
 const isSingleType = t => t === 'Single' || t === 'EP';
 // 專輯名不拿掉 (Deluxe)、(Remastered) 這類版本字：正常版和 Deluxe 版跟原生 Spotify 一樣是兩張不同的專輯（v88）
 const normTitle = s => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '').trim();
-const albumKey = a => `${norm(a.artist)}|${normTitle(a.title)}${isSingleType(a.type) ? '|s' : ''}`;
+// kx：同一位演出者的作品清單裡有兩張名稱、類型都一樣的（Spotify 上是不同的兩張），第二張起加上 Spotify id 分開（v89）
+const albumKey = a => `${norm(a.artist)}|${normTitle(a.title)}${isSingleType(a.type) ? '|s' : ''}${a.kx ? '|' + a.kx : ''}`;
 // 舊資料的單曲沒有「|s」，搬到新的鍵（雲端也會跟著更新）
 function migrateKeys() {
   const now = Date.now(); let n = 0;
@@ -62,7 +63,8 @@ function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (
 const statusOf = k => db.albums[k]?.status || null;
 
 function fromSpotify(al) {
-  const t = al.album_type;
+  // 演出者作品清單裡用 album_group（就是原生 App 的分頁：專輯／單曲和迷你專輯），其他地方用 album_type
+  const g = al.album_group, t = g === 'album' || g === 'single' || g === 'compilation' ? g : al.album_type;
   return {
     id: 'sp:' + al.id, spotifyId: al.id, title: al.name,
     artist: (al.artists || []).map(a => a.name).join(' & '), artistId: al.artists?.[0]?.id || '',
@@ -224,8 +226,15 @@ function logDisc(st, raw, r, err) {
 async function artistAlbums(id, name, onPage, groups = 'album,single') {
   const out = [];
   const st = { name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), total: null, pages: 0, api: 0 };
+  // 規則：Spotify 上「專輯」「單曲和迷你專輯」有幾張就顯示幾張，不自行合併或隱藏（只有同一個 Spotify id 重複出現才算一張）
   const finish = (err) => {
-    const r = dedupe(out.map(fromSpotify)).sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
+    const ids = new Set(), ks = new Set(), r = [];
+    out.forEach(al => {
+      if (!al?.id || ids.has(al.id)) return; ids.add(al.id);
+      const a = fromSpotify(al); if (ks.has(albumKey(a))) a.kx = al.id;
+      ks.add(albumKey(a)); r.push(a);
+    });
+    r.sort((a, b) => (b.date || b.year || '').localeCompare(a.date || a.year || ''));
     if (err) { r.incomplete = true; r.err = err.message || String(err); }
     return r;
   };
@@ -234,7 +243,7 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
     let viaApi = !cooldownLeft('artists'), apiErr = null;
     if (viaApi) {
       let mk = '&market=from_token';
-      for (let off = 0; off < 400; off += 10) {
+      for (let off = 0; off < 2000; off += 10) {
         const path = `/artists/${id}/albums?include_groups=${groups}${mk}&limit=10&offset=${off}`;
         const net = !isFresh(path);
         let j;
@@ -567,7 +576,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v88';
+const APP_VER = 'v89';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1150,9 +1159,9 @@ const atStale = c => !c || Date.now() - c.at > (c.src === 'search' ? 6 * 36e5 : 
 const artistTotals = (() => { try { const t = JSON.parse(localStorage.getItem(AT_KEY)) || {}; Object.keys(t).forEach(k => { if (!t[k]?.keys?.length) delete t[k]; }); return t; } catch (e) { return {}; } })();
 // v87：舊清單可能是用過期的分頁拼出來的（會漏專輯）；v88：舊清單把正常版和 Deluxe 版併成一張
 // → 全部用新的專輯鍵重算，並標成需要重新檢查；背景每次打開只慢慢重抓幾位
-if (!localStorage.getItem('heard.atRecheck88')) {
+if (!localStorage.getItem('heard.atRecheck89')) {
   Object.values(artistTotals).forEach(c => { c.at = 0; if (c.list?.length) c.keys = c.list.map(albumKey); });
-  try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); localStorage.setItem('heard.atRecheck88', '1'); } catch (e) {}
+  try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); localStorage.setItem('heard.atRecheck89', '1'); } catch (e) {}
 }
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
@@ -1162,7 +1171,7 @@ function setArtistTotal(name, id, albums, img) {
     albums = Object.assign([...prev.list, ...albums.filter(a => !have.has(albumKey(a)))], { src: prev.src });
   }
   // list：完整作品清單也存在手機上，打開演出者頁直接顯示、Spotify 限流時也看得到
-  const list = albums.map(({ id: aid, spotifyId, title, artist, artistId, date, type, year, tracks, cover }) => ({ id: aid, spotifyId, title, artist, artistId, date, type, year, tracks, cover }));
+  const list = albums.map(({ id: aid, spotifyId, title, artist, artistId, date, type, year, tracks, cover, kx }) => ({ id: aid, spotifyId, title, artist, artistId, date, type, year, tracks, cover, ...(kx ? { kx } : {}) }));
   artistTotals[norm(name)] = { id, keys: albums.map(albumKey), list, at: Date.now(), src: albums.src || 'api', img: img ?? (prev?.id === id ? prev?.img : '') ?? '' };
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); } catch (e) {}
 }
