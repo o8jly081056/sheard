@@ -553,7 +553,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v94';
+const APP_VER = 'v95';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1285,7 +1285,7 @@ function renderArtists(app) {
       return `<button class="acard" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="acard-av">${c ? `<img loading="lazy" src="${esc(c)}" alt="">` : `<span>${esc(x.name[0])}</span>`}</div>
         <div class="acard-n">${esc(x.name)}</div>
-        <div class="acard-p${pg ? '' : ' muted'}">${pg ? `${pg.pct}%` : `已聽 ${x.heard.length} 張`}</div></button>`;
+        <div class="acard-p${pg ? '' : ' muted'}">${pg ? `${pg.pct}%` : '—'}</div></button>`;
     }).join('')}</div>`
     : list.length ? `<div class="list">${list.map(x => {
       const c = artistTotals[norm(x.name)]?.img || x.heard[0]?.cover || '';
@@ -1294,9 +1294,9 @@ function renderArtists(app) {
       if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
       return `<button class="li" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="av">${c ? `<img src="${esc(c)}" alt="">` : esc(x.name[0])}</div>
-        <div class="grow"><div class="row-between"><div class="name">${esc(x.name)}</div>${pg ? `<b class="pct">${pg.pct}%</b>` : ''}</div>
-          <div class="muted small">${pg ? `聽過 ${pg.heard} / ${pg.total} 張` : `已聽 ${x.heard.length} 張${spOn() ? ' · 計算中…' : ''}`}</div>
-          ${pg ? `<div class="bar"><i style="width:${pg.pct}%"></i></div>` : ''}</div>
+        <div class="grow"><div class="row-between"><div class="name">${esc(x.name)}</div><b class="pct${pg ? '' : ' muted'}">${pg ? pg.pct + '%' : '—'}</b></div>
+          <div class="muted small">聽過 ${pg ? pg.heard : statsFor(x.name, []).heard} / ${pg ? pg.total : '—'} 張</div>
+          <div class="bar"><i style="width:${pg ? pg.pct : 0}%"></i></div></div>
         <span class="muted">›</span></button>`;
     }).join('')}</div>`
     : state.artQ ? '<div class="empty">沒有符合的演出者</div>' : all.length ? `<div class="empty">${df === 'done' ? '還沒有聽完的演出者' : '所有演出者都聽完了'}</div>` : `<div class="empty"><b>還沒有演出者</b>標記第一張專輯後，演出者會出現在這裡</div>`}`;
@@ -1397,20 +1397,21 @@ async function renderArtist(app) {
   }
   // 進度一律用跟演出者列表同一份資料（artistTotals）算，兩邊的進度條才會一樣；
   // 還沒有完整作品清單時才用目前頁面上抓到的作品
-  const st = artistProgress(v.name) || statsFor(v.name, v.albums.map(albumKey));
+  // 跟演出者列表只用同一份資料：還沒有完整作品清單時，兩邊都顯示「—」
+  const st = artistProgress(v.name);
   const keys = new Set(v.albums.map(albumKey));
   const own = remember([...v.albums, ...local.filter(a => !keys.has(albumKey(a)))]);
   const ARTIST_OPTS = RELEASES;
   const all = own.filter(a => inGroup(a, v.filter));
   const groups = v.filter ? [[v.filter, ARTIST_OPTS.find(o => o[0] === v.filter)[1]]] : RELEASES;
   // 上方的進度條不受篩選影響，永遠跟演出者列表一致（分類的進度看各區塊標題）
-  const heard = st.heard, totalN = st.total, pct = st.pct;
+  const heard = st ? st.heard : statsFor(v.name, []).heard, totalN = st ? st.total : '—', pct = st ? st.pct : 0;
   const cover = v.img || all.find(a => a.cover)?.cover;
   app.innerHTML = `${head}
     <div class="artist-hero">
       <div class="av">${cover ? `<img src="${esc(cover)}" alt="">` : ''}</div>
       <div style="flex:1;min-width:0"><h2>${esc(v.name)}</h2>
-        <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張</span><b style="font-size:18px">${pct}%</b></div>
+        <div class="row-between"><span class="muted small">聽過 ${heard} / ${totalN} 張</span><b style="font-size:18px">${st ? pct + '%' : '—'}</b></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
         ${(() => { const inList = inArtistList(v.name);
           return `<button class="follow-btn${inList ? ' on' : ''}" data-act="follow">${inList ? '已加入' : '加入'}</button>`; })()}
