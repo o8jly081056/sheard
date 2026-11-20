@@ -211,7 +211,8 @@ async function searchArtistsTop(q) {
 }
 const isFresh = path => !(freshKeys.size && forceFresh(path)) && (cache.has(path) || (pcache[path] && Date.now() - pcache[path].t < ttlFor(path)));
 let discBusy = 0;
-const artistLoads = [];   // 診斷用：最近幾次打開演出者頁的結果
+const artistLoads = (() => { try { return JSON.parse(localStorage.getItem('heard.artistLoads')) || []; } catch (e) { return []; } })();   // 診斷用：最近幾次打開演出者頁的結果（存在手機上，重開 App 也看得到）
+const saveLoads = () => { try { localStorage.setItem('heard.artistLoads', JSON.stringify(artistLoads)); } catch (e) {} };
 // 抓演出者在 Spotify 上的全部作品（專輯、單曲和迷你專輯；不含參與的專輯與合輯）
 // 開發模式每頁最多 10 筆，逐頁翻；每頁都存在手機上，中途被限流也會保留已抓到的，恢復後從斷掉的地方接著抓
 // 回傳陣列；沒抓完時陣列帶 incomplete=true 與 err
@@ -552,7 +553,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v93';
+const APP_VER = 'v94';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1350,7 +1351,7 @@ async function renderArtist(app) {
     v.albums = remember(ac.list.map(x => ({ ...x }))); v.cached = true;
     if (!isSpId(v.id) && isSpId(ac.id)) v.id = ac.id;
     artistLoads.unshift({ name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), from: 'cache', n: v.albums.length, age: Math.round((Date.now() - ac.at) / 60000) + ' 分鐘前' });
-    artistLoads.length = Math.min(artistLoads.length, 8);
+    artistLoads.length = Math.min(artistLoads.length, 8); saveLoads();
     if ((atStale(ac) || ac.src === 'search') && spOn() && isSpId(v.id) && !spBlocked() && !cooldownLeft('artists')) bgRefreshArtist(v);
   }
   if (!v.albums) {
@@ -1362,7 +1363,7 @@ async function renderArtist(app) {
       if (v.err && cw) setTimeout(() => { if (state.view === v) { delete v.albums; delete v.err; v.cached = false; render(); } }, cw * 1000 + 300);
     };
     const rec = { name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), idIn: v.id || '', id: '', n: null, err: '', step: '開始', t0: Date.now() };
-    artistLoads.unshift(rec); artistLoads.length = Math.min(artistLoads.length, 8);
+    artistLoads.unshift(rec); artistLoads.length = Math.min(artistLoads.length, 8); saveLoads();
     try {
       if (!spOn()) { v.albums = []; rec.err = '未連結 Spotify'; }
       else {
@@ -1381,7 +1382,7 @@ async function renderArtist(app) {
         }
       }
     } catch (e) { done(Object.assign([], { incomplete: true, err: e.message || '載入失敗' })); rec.err = e.message || '載入失敗'; rec.step += '（失敗）'; }
-    rec.sec = Math.round((Date.now() - rec.t0) / 1000);
+    rec.sec = Math.round((Date.now() - rec.t0) / 1000); saveLoads();
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached && !v.loading && !v.err) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
