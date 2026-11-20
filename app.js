@@ -553,7 +553,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v95';
+const APP_VER = 'v96';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -616,7 +616,7 @@ function albumRow(a, no) {
     <div class="arow-main">
       <div class="arow-t">${esc(a.title)}</div>
       <div class="arow-a">${esc(a.artist)}</div>
-      <div class="arow-m">${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}</div>
+      <div class="arow-m">${state.view?.type === 'artist' && state.view.newKeys?.has(k) && !isDone(s) ? '<span class="lbl new">新</span> · ' : ''}${typeLabel(a.type)}${a.year ? ' · ' + a.year : ''}</div>
     </div>
     <div class="arow-acts">
         ${s !== 'heard' ? `<button class="mini ${s === 'archived' ? 'arch' : ''}" data-arch="${esc(k)}" aria-label="封存">${I.archive}</button>` : ''}
@@ -877,7 +877,7 @@ function renderLib(app, status = 'heard') {
   list.sort((a, b) => { const r = sdef.cmp(a, b, status) || timeOf(a, status) - timeOf(b, status); return so.desc ? -r : r; });
   remember(list);
   app.innerHTML = `${isH ? '' : `<div class="backbar plain"><button class="back" data-act="back">${I.back}返回</button></div>`}
-    <div class="home-head"><header class="top"><div><h1>${name}</h1><div class="sub">${total} 張專輯 · ${artists} 位演出者</div></div>${isH ? gearBtn() : ''}</header></div>
+    <div class="home-head"><header class="top"><div><h1>${name}</h1><div class="sub">${total} 張專輯 · ${artists} 位演出者</div>${isH && total ? `<button class="sub-link" data-act="months">本月聽了 ${monthCounts().now} 張 ›</button>` : ''}</div>${isH ? gearBtn() : ''}</header></div>
     ${total ? `<div class="search-row${isH ? '' : ' under-back'}" style="padding-bottom:10px"><div class="search">${I.search}<input id="lq" type="search" placeholder="在${name}裡搜尋" value="${esc(lqs)}"></div></div>
     ${chipBar('lib', RELEASES, lf)}
     <div class="row-between" style="margin-bottom:12px">
@@ -890,6 +890,35 @@ function renderLib(app, status = 'heard') {
     : isH ? `<div class="empty"><b>還沒有已聽過的專輯</b>到「首頁」找專輯，點 <span class="inline-ic">${I.check}</span> 標記已聽過</div>` : '<div class="empty">沒有封存的專輯</div>'}
     ${isH && archiveCount() ? `<button class="archive-link" data-act="archive">${I.archive}已封存 ${archiveCount()} 張 ›</button>` : ''}`;
   const lq = $('#lq'); if (lq) lq.oninput = e => { state[isH ? 'libQ' : 'archQ'] = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#lq'); n.focus(); n.setSelectionRange(pos, pos); };
+}
+
+/* ---------- 每月聽幾張 ---------- */
+// 已聽過＋封存（封存也算聽過）依「標記已聽過」的時間分月；只用手機上的資料，不連 Spotify
+function monthCounts() {
+  const m = new Map();
+  myAlbums().filter(a => isDone(a.status)).forEach(a => {
+    const t = a.heardAt || a.addedAt; if (!t) return;
+    const d = new Date(t), k = d.getFullYear() * 12 + d.getMonth();
+    m.set(k, (m.get(k) || 0) + 1);
+  });
+  const d = new Date(), now = d.getFullYear() * 12 + d.getMonth();
+  return { m, now: m.get(now) || 0, cur: now };
+}
+function openMonths() {
+  state.current = null;
+  const { m, cur } = monthCounts();
+  const first = Math.min(cur, ...m.keys()), max = Math.max(1, ...m.values());
+  let html = '', year = null;
+  for (let k = cur; k >= first; k--) {
+    const y = Math.floor(k / 12), mo = k % 12 + 1, n = m.get(k) || 0;
+    if (y !== year) {
+      year = y; let sum = 0; for (let j = y * 12; j < y * 12 + 12; j++) sum += m.get(j) || 0;
+      html += `<div class="mon-y"><span>${y} 年</span><span>共 ${sum} 張</span></div>`;
+    }
+    html += `<div class="mon"><span class="mon-l">${mo} 月</span><div class="mon-b"><i style="width:${n / max * 100}%"></i></div><span class="mon-n${n ? '' : ' muted'}">${n}</span></div>`;
+  }
+  $('#sheet').innerHTML = `<div class="grab"></div><div class="sort-sheet"><div class="sort-h">每月聽幾張</div>${html}</div>`;
+  showSheet();
 }
 
 /* ---------- 排序 ---------- */
@@ -1140,8 +1169,22 @@ if (!localStorage.getItem('heard.atRecheck89')) {
   Object.values(artistTotals).forEach(c => { c.at = 0; if (c.list?.length) c.keys = c.list.map(albumKey); });
   try { localStorage.setItem(AT_KEY, JSON.stringify(artistTotals)); localStorage.setItem('heard.atRecheck89', '1'); } catch (e) {}
 }
+// 新作品提醒：重新抓到完整清單時，比上次多出來（而且還沒聽過）的作品；打開該演出者頁就清掉
+const NW_KEY = 'heard.newWorks';
+let newWorks = (() => { try { return JSON.parse(localStorage.getItem(NW_KEY)) || {}; } catch (e) { return {}; } })();
+const saveNewWorks = () => { try { localStorage.setItem(NW_KEY, JSON.stringify(newWorks)); } catch (e) {} };
+const newCount = name => (newWorks[norm(name)] || []).filter(k => !isDone(statusOf(k))).length;
 function setArtistTotal(name, id, albums, img) {
   const prev = artistTotals[norm(name)];
+  if (prev?.src === 'api' && prev.list?.length && prev.id === id && (albums.src || 'api') === 'api') {
+    const had = new Set(prev.list.map(a => a.spotifyId || a.id));
+    const added = albums.filter(a => !had.has(a.spotifyId || a.id)).map(albumKey).filter(k => !isDone(statusOf(k)));
+    if (added.length) {
+      const n = norm(name), av = state.view?.type === 'artist' && norm(state.view.name) === n ? state.view : null;
+      if (av) { av.newKeys = new Set([...(av.newKeys || []), ...added]); }   // 正在看這位：直接在頁面上標「新」
+      else { newWorks[n] = [...new Set([...(newWorks[n] || []), ...added])]; saveNewWorks(); }
+    }
+  }
   // 搜尋拼出來的清單常常不完整：不能蓋掉完整清單，只把多找到的補進去
   if (albums.src === 'search' && prev?.list?.length && prev.id === id) {
     const have = new Set(prev.list.map(albumKey));
@@ -1284,7 +1327,7 @@ function renderArtists(app) {
       if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
       return `<button class="acard" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="acard-av">${c ? `<img loading="lazy" src="${esc(c)}" alt="">` : `<span>${esc(x.name[0])}</span>`}</div>
-        <div class="acard-n">${esc(x.name)}</div>
+        <div class="acard-n">${newCount(x.name) ? '<i class="new-dot"></i>' : ''}${esc(x.name)}</div>
         <div class="acard-p${pg ? '' : ' muted'}">${pg ? `${pg.pct}%` : '—'}</div></button>`;
     }).join('')}</div>`
     : list.length ? `<div class="list">${list.map(x => {
@@ -1294,8 +1337,8 @@ function renderArtists(app) {
       if (!pg || atStale(ce) || ce.img === undefined) queueArtistTotal(x.name);
       return `<button class="li" data-artist="${x.id}" data-name="${esc(x.name)}">
         <div class="av">${c ? `<img src="${esc(c)}" alt="">` : esc(x.name[0])}</div>
-        <div class="grow"><div class="row-between"><div class="name">${esc(x.name)}</div><b class="pct${pg ? '' : ' muted'}">${pg ? pg.pct + '%' : '—'}</b></div>
-          <div class="muted small">聽過 ${pg ? pg.heard : statsFor(x.name, []).heard} / ${pg ? pg.total : '—'} 張</div>
+        <div class="grow"><div class="row-between"><div class="name">${newCount(x.name) ? '<i class="new-dot"></i>' : ''}${esc(x.name)}</div><b class="pct${pg ? '' : ' muted'}">${pg ? pg.pct + '%' : '—'}</b></div>
+          <div class="muted small">聽過 ${pg ? pg.heard : statsFor(x.name, []).heard} / ${pg ? pg.total : '—'} 張${newCount(x.name) ? ` · <span class="new-txt">${newCount(x.name)} 張新作品</span>` : ''}</div>
           <div class="bar"><i style="width:${pg ? pg.pct : 0}%"></i></div></div>
         <span class="muted">›</span></button>`;
     }).join('')}</div>`
@@ -1340,6 +1383,8 @@ async function bgRefreshArtist(v) {
 async function renderArtist(app) {
   const v = state.view;
   if (!('unheard' in v)) {
+    const nk = newWorks[norm(v.name)];
+    if (nk) { v.newKeys = new Set(nk); delete newWorks[norm(v.name)]; saveNewWorks(); }
     const f = loadArtistFilter();
     v.unheard = !!f.unheard; v.filter = RELEASES.some(r => r[0] === f.filter) ? f.filter : null;
   }
@@ -1784,6 +1829,7 @@ document.addEventListener('click', async e => {
     case 'viewToggle': { const st = d.st; db.settings.view ??= {}; db.settings.view[st] = viewOf(st) === 'list' ? 'grid' : 'list'; save(); return render(); }
     case 'archive': hideSheet(); state.archQ = ''; state.archFilter = null; state.view = { type: 'archive' }; window.scrollTo(0, 0); return render();
     case 'sortMenu': return openSortMenu();
+    case 'months': return openMonths();
     case 'sortFlip': { const st = libSt(), c = sortOf(st); db.settings.sort[st] = { key: c.key, desc: !c.desc }; save(); return render(); }
     case 'manual': return openManual();
     case 'export': return exportData();
