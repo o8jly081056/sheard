@@ -249,7 +249,7 @@ async function artistAlbums(id, name, onPage, groups = 'album,single') {
         let j;
         try { j = await spCached(path); }
         catch (e) {
-          if (off === 0 && mk && !/限制|上限|拒絕|過期|尚未/.test(e.message)) { mk = ''; off -= 10; continue; }
+          if (off === 0 && mk && !/限制|上限|拒絕|過期|尚未|回應|連不上/.test(e.message)) { mk = ''; off -= 10; continue; }
           apiErr = e; break;
         }
         const items = (j?.items || []).filter(Boolean);
@@ -389,7 +389,12 @@ async function spRaw(path, retry = true) {
     catch (e) { spotifyLogout(); render(); throw new Error('Spotify 登入已過期，請重新連結'); }
   }
   // 個人資料（最近播放、正在播放）每次都要最新的，不讓瀏覽器用快取
-  const res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access }, cache: path.startsWith('/me') ? 'no-store' : 'default' });
+  // 最多等 15 秒：Spotify 沒回應時不要讓畫面一直轉圈
+  const ac = new AbortController(), to = setTimeout(() => ac.abort(), 15000);
+  let res;
+  try { res = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + spTok.access }, cache: path.startsWith('/me') ? 'no-store' : 'default', signal: ac.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'Spotify 沒有回應（等了 15 秒）' : '連不上 Spotify，請檢查網路'); }
+  finally { clearTimeout(to); }
   if (res.ok && cb.strikes) { cb.strikes = 0; saveCool(); if (!spBlocked()) setTimeout(pumpArtistTotals, 5000); }   // Spotify 放行了，背景才恢復
   if (res.status === 204) return null;
   if (res.status === 401 && retry) { spTok.exp = 0; return spRaw(path, false); }
@@ -547,7 +552,7 @@ const gearBtn = () => `<button class="icon-btn" data-act="menu" aria-label="設�
 /* ================= 畫面 ================= */
 // 回到上一頁時恢復原本的捲動位置；返回手勢拖動時，底下要顯示上一頁的畫面
 let baseY = 0, baseSnap = null, viewShown = false;
-const APP_VER = 'v92';
+const APP_VER = 'v93';
 const pageY = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop || 0, document.body.scrollTop || 0);
 function onPageScroll() {
   const y = pageY();
@@ -1180,6 +1185,8 @@ async function pumpArtistTotals() {
   const lastT = Math.max(spCool.artists?.lastT || 0, spCool.search?.lastT || 0);
   if (spBlocked() && Date.now() - lastT < 18e5) { pumpLater(18e5 - (Date.now() - lastT) + 1000); return; }
   if (spBlocked() && atRunning) return;
+  const av = state.view?.type === 'artist' ? state.view : null;
+  if (av && (av.loading || !av.albums)) { pumpLater(5000); return; }   // 演出者頁正在載入：背景先暫停，不跟它搶請求
   const cw = cooldownLeft('artists');
   if (cw) { pumpLater(cw * 1000 + 500); return; }
   const nextName = atQueue.values().next().value;
@@ -1354,25 +1361,27 @@ async function renderArtist(app) {
       const cw = Math.min(cooldownLeft('artists'), cooldownLeft('search'));
       if (v.err && cw) setTimeout(() => { if (state.view === v) { delete v.albums; delete v.err; v.cached = false; render(); } }, cw * 1000 + 300);
     };
-    const rec = { name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), idIn: v.id || '', id: '', n: null, err: '' };
+    const rec = { name: v.name, at: new Date().toLocaleTimeString('zh-TW', { hour12: false }), idIn: v.id || '', id: '', n: null, err: '', step: '開始', t0: Date.now() };
     artistLoads.unshift(rec); artistLoads.length = Math.min(artistLoads.length, 8);
     try {
       if (!spOn()) { v.albums = []; rec.err = '未連結 Spotify'; }
       else {
-        if (!isSpId(v.id)) v.id = await resolveArtistId(v.name);
-        rec.id = v.id || '';
+        if (!isSpId(v.id)) { rec.step = '找演出者 id'; v.id = await resolveArtistId(v.name); }
+        rec.id = v.id || ''; rec.step = '抓作品';
         if (!v.id) { v.albums = Object.assign([], { incomplete: true, err: '在 Spotify 找不到這位演出者' }); v.err = v.albums.err; rec.err = v.err; }
         else {
           v.loading = true;
           const list = await artistAlbums(v.id, v.name, part => {
+            rec.n = part.length; rec.step = `抓作品（已 ${part.length} 張）`;
             if (state.view !== v) return;
             const first = !v.albums; v.albums = part;
             if (first || !$('#sheet.show')) render();
           });
-          done(list); rec.n = list.length; rec.err = list.err || '';
+          done(list); rec.n = list.length; rec.err = list.err || ''; rec.step = '完成';
         }
       }
-    } catch (e) { done(Object.assign([], { incomplete: true, err: e.message || '載入失敗' })); rec.err = e.message || '載入失敗'; }
+    } catch (e) { done(Object.assign([], { incomplete: true, err: e.message || '載入失敗' })); rec.err = e.message || '載入失敗'; rec.step += '（失敗）'; }
+    rec.sec = Math.round((Date.now() - rec.t0) / 1000);
     if (state.view !== v) return;
   }
   if (v.albums.length && !v.cached && !v.loading && !v.err) { setArtistTotal(v.name, v.id, v.albums); v.cached = true; }
